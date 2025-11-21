@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}ParkShare RU — найти парковку рядом{% endblock %}
+
+{% block extra_head %}
+    <!-- Карта (можно переключиться на свои тайлы позже) -->
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+{% endblock %}
+
+{% block content %}
+<section class="ps-hero ps-animate-fade-up">
+    <div class="ps-hero-inner">
+        <div class="ps-hero-text">
+            <h1 class="ps-hero-title">
+                Парковка <span>в один тап</span>
+            </h1>
+            <p class="ps-hero-subtitle">
+                Найдите свободное место во дворе, у офиса или рядом с домом.
+                Бронирование, оплата и навигация — прямо в вашем браузере.
+            </p>
+            <div class="ps-hero-actions">
+                <a href="#search" class="ps-btn ps-btn-lg" data-scroll-to>
+                    Найти парковку рядом
+                </a>
+                <button type="button" class="ps-btn ps-btn-ghost ps-btn-lg" data-fill-location>
+                    Определить моё местоположение
+                </button>
+            </div>
+            <div class="ps-hero-meta">
+                Работает как приложение · Оффлайн-режим · Уведомления о бронях
+            </div>
+        </div>
+        <div class="ps-hero-visual">
+            <div class="ps-hero-card ps-animate-float">
+                <div class="ps-hero-card-line">
+                    <span class="ps-dot ps-dot--green"></span>
+                    Места рядом с вами найдены
+                </div>
+                <div class="ps-hero-card-line">
+                    <span class="ps-dot ps-dot--blue"></span>
+                    Средняя цена: <strong>180 ₽/час</strong>
+                </div>
+                <div class="ps-hero-card-line">
+                    <span class="ps-dot ps-dot--yellow"></span>
+                    Свободных мест: <strong>{{ spots|length }}</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="search" class="ps-section ps-section--flush-top">
+    <div class="ps-section-header">
+        <h2 class="ps-section-title">Поиск парковки</h2>
+        <p class="ps-section-subtitle">
+            Можно искать по городу или точке на карте. На мобильных достаточно нажать
+            «Определить моё местоположение».
+        </p>
+    </div>
+
+    <div class="ps-grid ps-grid--2col@lg ps-grid--gap-xl">
+        <div>
+            <form method="get" class="ps-card ps-card--elevated ps-form" autocomplete="off">
+                <div class="ps-form-row">
+                    <label for="city" class="ps-form-label">Город</label>
+                    <input id="city"
+                           name="city"
+                           class="ps-input"
+                           placeholder="Москва"
+                           value="{{ request.GET.city }}">
+                </div>
+
+                <div class="ps-grid ps-grid--2col ps-grid--gap-md">
+                    <div class="ps-form-row">
+                        <label for="lat" class="ps-form-label">Широта</label>
+                        <input id="lat"
+                               name="lat"
+                               class="ps-input"
+                               placeholder="55.75"
+                               value="{{ request.GET.lat }}">
+                    </div>
+                    <div class="ps-form-row">
+                        <label for="lng" class="ps-form-label">Долгота</label>
+                        <input id="lng"
+                               name="lng"
+                               class="ps-input"
+                               placeholder="37.61"
+                               value="{{ request.GET.lng }}">
+                    </div>
+                </div>
+
+                <div class="ps-form-row">
+                    <label for="radius" class="ps-form-label">Радиус поиска, км</label>
+                    <input id="radius"
+                           name="radius_km"
+                           class="ps-input"
+                           type="number"
+                           step="0.1"
+                           min="0.1"
+                           value="{{ request.GET.radius_km|default:'1' }}">
+                </div>
+
+                <div class="ps-form-actions">
+                    <button class="ps-btn ps-btn-lg" type="submit">
+                        Найти места
+                    </button>
+                    <button class="ps-btn ps-btn-secondary ps-btn-lg"
+                            type="button"
+                            data-fill-location>
+                        Использовать моё местоположение
+                    </button>
+                </div>
+            </form>
+
+            <div class="ps-hint ps-animate-fade-up ps-animate-delay-1">
+                Совет: после первого поиска PWA запомнит ваш город и будет открываться
+                сразу с подходящими предложениями.
+            </div>
+        </div>
+
+        <div>
+            <div id="map" class="ps-map"></div>
+
+            <div class="ps-section-subheader">
+                <h3 class="ps-section-title-sm">Доступные места</h3>
+            </div>
+
+            <div class="ps-spots-list" data-spots-list>
+                <!-- Skeleton при загрузке -->
+                <div class="ps-card ps-card--spot ps-card--skeleton">
+                    <div class="ps-skeleton-line ps-skeleton-line--lg"></div>
+                    <div class="ps-skeleton-line"></div>
+                    <div class="ps-skeleton-line ps-skeleton-line--short"></div>
+                </div>
+                <div class="ps-card ps-card--spot ps-card--skeleton">
+                    <div class="ps-skeleton-line ps-skeleton-line--lg"></div>
+                    <div class="ps-skeleton-line"></div>
+                    <div class="ps-skeleton-line ps-skeleton-line--short"></div>
+                </div>
+
+                {% for spot in spots %}
+                    <article class="ps-card ps-card--spot ps-animate-fade-up ps-animate-stagger">
+                        <div class="ps-card-header">
+                            <div class="ps-card-title">
+                                {{ spot.lot.city }}, {{ spot.lot.name }} — {{ spot.name }}
+                            </div>
+                            <span class="ps-badge ps-badge--success">
+                                от {{ spot.hourly_price }} ₽/час
+                            </span>
+                        </div>
+                        <div class="ps-card-body">
+                            <div class="ps-card-line">
+                                Тип: {{ spot.get_vehicle_type_display }}
+                                {% if spot.has_ev_charging %}
+                                    · зарядка EV
+                                {% endif %}
+                                {% if spot.is_24_7 %}
+                                    · 24/7
+                                {% endif %}
+                            </div>
+                            <div class="ps-card-line ps-card-line--muted">
+                                Объект: {{ spot.lot.address }}
+                            </div>
+                        </div>
+                    </article>
+                {% empty %}
+                    <div class="ps-empty">
+                        <p>Подходящих мест пока нет. Попробуйте изменить город или радиус поиска.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <script>
+        (function () {
+            const mapEl = document.getElementById("map");
+            if (!mapEl || typeof L === "undefined") {
+                return;
+            }
+
+            // Базовый центр — Москва
+            const defaultLat = 55.75;
+            const defaultLng = 37.61;
+            const map = L.map(mapEl).setView([defaultLat, defaultLng], 11);
+
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19,
+                attribution: "&copy; OpenStreetMap contributors"
+            }).addTo(map);
+
+            const spots = [
+                {% for spot in spots %}
+                {
+                    lat: {{ spot.lot.latitude|default:"null" }},
+                    lng: {{ spot.lot.longitude|default:"null" }},
+                    title: "{{ spot.lot.city|escapejs }}, {{ spot.lot.name|escapejs }} — {{ spot.name|escapejs }}",
+                    price: "{{ spot.hourly_price }}"
+                },
+                {% endfor %}
+            ];
+
+            let bounds = [];
+            spots.forEach(function (s) {
+                if (s.lat === null || s.lng === null) {
+                    return;
+                }
+                const marker = L.marker([s.lat, s.lng]).addTo(map);
+                marker.bindPopup(
+                    "<strong>" + s.title + "</strong><br>от " + s.price + " ₽/час"
+                );
+                bounds.push([s.lat, s.lng]);
+            });
+
+            if (bounds.length) {
+                map.fitBounds(bounds, {padding: [16, 16]});
+            }
+        })();
+    </script>
+{% endblock %}

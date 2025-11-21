@@ -1,0 +1,90 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}ParkShare RU{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- PWA -->
+    <meta name="theme-color" content="#0d6efd">
+    <link rel="manifest" href="{% url 'manifest' %}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{% static 'icons/icon-192.png' %}">
+    <link rel="apple-touch-icon" sizes="512x512" href="{% static 'icons/icon-512.png' %}">
+
+    <!-- Favicon (минимальный набор) -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'icons/icon-72.png' %}">
+
+    <!-- Основные стили PWA -->
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="ps-body">
+<header class="ps-header">
+    <nav class="ps-navbar">
+        <div class="ps-navbar-left">
+            <a href="{% url 'landing' %}" class="ps-logo">
+                <span class="ps-logo-main">ParkShare</span><span class="ps-logo-accent">RU</span>
+            </a>
+        </div>
+
+        <button class="ps-navbar-toggle" type="button" data-menu-toggle aria-label="Открыть меню">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+
+        <div class="ps-navbar-menu" data-menu>
+            <a href="{% url 'landing' %}" class="ps-nav-link">Главная</a>
+            <a href="{% url 'user_dashboard' %}" class="ps-nav-link">Моя парковка</a>
+            {% if user.is_authenticated and user.is_owner %}
+                <a href="{% url 'owner_dashboard' %}" class="ps-nav-link">Кабинет владельца</a>
+            {% endif %}
+            {% if user.is_authenticated %}
+                <a href="{% url 'accounts:profile' %}" class="ps-nav-link">Профиль</a>
+                <a href="{% url 'accounts:logout' %}" class="ps-nav-link ps-nav-link--danger">Выйти</a>
+            {% else %}
+                <a href="{% url 'accounts:login' %}" class="ps-nav-link">Войти</a>
+                <a href="{% url 'accounts:register' %}" class="ps-nav-link ps-nav-link--primary">Регистрация</a>
+            {% endif %}
+        </div>
+    </nav>
+</header>
+
+<main class="ps-main">
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="ps-footer">
+    <div class="ps-footer-inner">
+        <span>© {% now "Y" %} ParkShare RU</span>
+        <span class="ps-footer-meta">PWA · Оффлайн · Быстрая загрузка</span>
+    </div>
+</footer>
+
+<!-- Back to top -->
+<button class="ps-back-to-top" type="button" data-back-to-top aria-label="Наверх">
+    ↑
+</button>
+
+<!-- Toasts -->
+<div class="ps-toast-container" aria-live="polite" aria-atomic="true"></div>
+
+<!-- PWA install banner -->
+<div class="ps-install-banner" data-install-banner hidden>
+    <div class="ps-install-banner-inner">
+        <div class="ps-install-banner-text">
+            Установите <strong>ParkShare RU</strong> как приложение
+        </div>
+        <div class="ps-install-banner-actions">
+            <button type="button" class="ps-btn ps-btn-secondary" data-install-dismiss>Позже</button>
+            <button type="button" class="ps-btn" data-install-accept>Установить</button>
+        </div>
+    </div>
+</div>
+
+<script src="{% static 'js/app.js' %}"></script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

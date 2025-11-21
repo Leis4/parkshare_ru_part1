@@ -1,0 +1,100 @@
+from pathlib import Path
+
+from django.conf import settings
+from django.conf.urls.static import static
+from django.contrib import admin
+from django.contrib.staticfiles import finders
+from django.http import Http404, HttpResponse
+from django.urls import include, path
+from django.views.decorators.cache import never_cache
+from django.views.generic import TemplateView
+from rest_framework import routers
+
+from accounts import views as accounts_api
+from vehicles import views as vehicles_api
+from parking import views as parking_views
+from payments import views as payments_api
+from ai import views as ai_api
+
+
+router = routers.DefaultRouter()
+
+# Accounts / пользователи (только API)
+router.register(r"accounts/users", accounts_api.UserViewSet, basename="user")
+
+# Vehicles
+router.register(r"vehicles", vehicles_api.VehicleViewSet, basename="vehicle")
+
+# Parking (основные модельные вьюсеты)
+router.register(r"parking/lots", parking_views.ParkingLotViewSet, basename="parking-lot")
+router.register(r"parking/spots", parking_views.ParkingSpotViewSet, basename="parking-spot")
+router.register(r"parking/bookings", parking_views.BookingViewSet, basename="booking")
+router.register(r"parking/waitlist", parking_views.WaitlistViewSet, basename="waitlist")
+router.register(r"parking/complaints", parking_views.ComplaintViewSet, basename="complaint")
+
+# Payments
+router.register(r"payments", payments_api.PaymentViewSet, basename="payment")
+
+
+@never_cache
+def service_worker(request):
+    """
+    Отдаём service-worker.js с корня домена, но физически он лежит в static/.
+
+    Это нужно, чтобы scope service worker распространялся на весь сайт.
+    """
+    path = finders.find("service-worker.js")
+    if not path:
+        raise Http404("Service worker not found")
+    with open(path, "rb") as f:
+        content = f.read()
+    return HttpResponse(content, content_type="application/javascript")
+
+
+@never_cache
+def manifest(request):
+    """
+    Отдаём manifest.webmanifest с правильным content-type.
+    """
+    path = finders.find("manifest.webmanifest")
+    if not path:
+        raise Http404("Manifest not found")
+    with open(path, "rb") as f:
+        content = f.read()
+    return HttpResponse(content, content_type="application/manifest+json")
+
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+
+    # PWA файлы
+    path("service-worker.js", service_worker, name="service_worker"),
+    path("manifest.webmanifest", manifest, name="manifest"),
+
+    # Web‑страницы
+    path("", parking_views.LandingPageView.as_view(), name="landing"),
+    path("личный-кабинет/", parking_views.UserDashboardView.as_view(), name="user_dashboard"),
+    path("кабинет-владельца/", parking_views.OwnerDashboardView.as_view(), name="owner_dashboard"),
+    path("offline/", TemplateView.as_view(template_name="offline.html"), name="offline"),
+
+    # Auth страницы (регистрация/логин)
+    path("accounts/", include("accounts.urls")),
+
+    # API (DRF router)
+    path("api/", include(router.urls)),
+
+    # AI API
+    path("api/ai/recommendations/", ai_api.RecommendationsAPIView.as_view(), name="ai_recommendations"),
+    path("api/ai/stress-index/", ai_api.StressIndexAPIView.as_view(), name="ai_stress_index"),
+    path("api/ai/departure-assistant/", ai_api.DepartureAssistantAPIView.as_view(), name="ai_departure_assistant"),
+
+    # Payments webhooks
+    path("payments/webhook/yookassa/", payments_api.YooKassaWebhookView.as_view(), name="yookassa_webhook"),
+
+    # DRF browsable API login/logout
+    path("api-auth/", include("rest_framework.urls")),
+]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
