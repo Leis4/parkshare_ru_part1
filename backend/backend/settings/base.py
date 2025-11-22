@@ -8,10 +8,12 @@ import environ
 # Пути
 # ---------------------------------------------------------------------------
 
-# BASE_DIR = backend/ (где лежит manage.py)
+# BASE_DIR — корень репозитория: C:\Users\Sultan\Downloads\parkshare_ru_part1
 BASE_DIR = Path(__file__).resolve().parents[3]
-# PROJECT_ROOT = корень репозитория (где templates/, static/, .env)
-PROJECT_ROOT = BASE_DIR.parent
+
+# Тут главная правка: больше не уходим на уровень выше
+PROJECT_ROOT = BASE_DIR  # C:\Users\Sultan\Downloads\parkshare_ru_part1
+
 
 # ---------------------------------------------------------------------------
 # Окружение
@@ -75,7 +77,7 @@ ROOT_URLCONF = "backend.config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [PROJECT_ROOT / "templates"],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -97,7 +99,7 @@ ASGI_APPLICATION = "backend.config.asgi.application"
 
 DATABASES = {
     "default": env.db(
-        "DATABASE_URL", default=f"sqlite:///{PROJECT_ROOT / 'db.sqlite3'}"
+        "DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
     )
 }
 
@@ -142,13 +144,13 @@ USE_TZ = True
 # ---------------------------------------------------------------------------
 
 STATIC_URL = "/static/"
-STATIC_ROOT = PROJECT_ROOT / "staticfiles"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
-    PROJECT_ROOT / "static",
+    BASE_DIR / "static",
 ]
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = PROJECT_ROOT / "media"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # ---------------------------------------------------------------------------
 # PWA

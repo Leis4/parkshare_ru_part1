@@ -1,7 +1,7 @@
 ################################################################################
 # PROJECT DUMP
 # Root: C:\Users\Sultan\Downloads\parkshare_ru_part1
-# Generated at: 2025-11-22 12:38:37
+# Generated at: 2025-11-22 14:08:31
 ################################################################################
 PROJECT TREE:
 --------------------------------------------------------------------------------
@@ -15,11 +15,13 @@ parkshare_ru_part1/
     docker-compose.yml
     dump_project.py
     entrypoint.sh
+    project_dump.txt
     requirements.txt
     accounts/
         __init__.py
         admin.py
         apps.py
+        auth.py
         forms.py
         models.py
         serializers.py
@@ -46,9 +48,17 @@ parkshare_ru_part1/
                 __init__.py
                 asgi.py
                 celery.py
-                settings.py
                 urls.py
                 wsgi.py
+            settings/
+                __init__.py
+                base.py
+                local.py
+                production.py
+        tests/
+            __init__.py
+            test_auth_api.py
+            test_booking_model.py
     core/
         __init__.py
         admin.py
@@ -100,6 +110,14 @@ parkshare_ru_part1/
         offline.html
         accounts/
             login.html
+            password_change.html
+            password_change_done.html
+            password_reset.html
+            password_reset_complete.html
+            password_reset_confirm.html
+            password_reset_done.html
+            password_reset_email.txt
+            password_reset_subject.txt
             profile.html
             register.html
         parking/
@@ -534,6 +552,12 @@ sh -c "python backend/manage.py migrate &&
              gunicorn backend.config.wsgi:application --bind 0.0.0.0:8000"
 
 ################################################################################
+# File: project_dump.txt
+################################################################################
+
+
+
+################################################################################
 # File: requirements.txt
 ################################################################################
 
@@ -551,6 +575,7 @@ pandas==2.2.3
 scikit-learn==1.7.2
 gunicorn==23.0.0
 yookassa
+drf-spectacular==0.27.2
 
 
 ################################################################################
@@ -619,6 +644,61 @@ class AccountsConfig(AppConfig):
 
 
 ################################################################################
+# File: accounts\auth.py
+################################################################################
+
+# accounts/auth.py
+
+from __future__ import annotations
+
+from typing import Optional
+
+from django.contrib.auth import get_user_model
+
+from core.utils import normalize_phone
+
+User = get_user_model()
+
+
+def find_user_by_identifier(identifier: str) -> Optional[User]:
+    """
+    Возвращает пользователя по логину / email / телефону.
+
+    Используется в HTML-форме логина и в API.
+    """
+    if not identifier:
+        return None
+
+    ident = identifier.strip()
+    qs = User.objects.filter(is_active=True)
+
+    # 1) Email
+    if "@" in ident:
+        email = ident.lower()
+        try:
+            return qs.get(email_encrypted=email)
+        except User.DoesNotExist:
+            return None
+        except User.MultipleObjectsReturned:
+            return qs.filter(email_encrypted=email).order_by("date_joined").first()
+
+    # 2) Телефон
+    phone = normalize_phone(ident)
+    if phone:
+        user = qs.filter(phone_encrypted=phone).order_by("date_joined").first()
+        if user:
+            return user
+
+    # 3) Логин
+    try:
+        return qs.get(username__iexact=ident)
+    except User.DoesNotExist:
+        return None
+    except User.MultipleObjectsReturned:
+        return qs.filter(username__iexact=ident).order_by("date_joined").first()
+
+
+################################################################################
 # File: accounts\forms.py
 ################################################################################
 
@@ -627,11 +707,39 @@ class AccountsConfig(AppConfig):
 from typing import Any
 
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.utils.translation import gettext_lazy as _
 
 from core.utils import normalize_phone
 from .models import User
+
+
+class LoginForm(AuthenticationForm):
+    """
+    Форма входа: одно поле для логина / email / телефона + пароль.
+    """
+
+    username = forms.CharField(
+        label=_("Логин / Email / Телефон"),
+        widget=forms.TextInput(attrs={"autofocus": True, "class": "ps-input"}),
+    )
+
+    def clean(self):
+        """
+        Подменяем username на реальный логин пользователя, чтобы
+        AuthenticationForm могла вызвать authenticate() как обычно.
+        """
+        from .auth import find_user_by_identifier  # локальный импорт
+
+        identifier = self.cleaned_data.get("username")
+        password = self.cleaned_data.get("password")
+
+        if identifier and password:
+            user = find_user_by_identifier(identifier)
+            if user is not None:
+                self.cleaned_data["username"] = user.get_username()
+
+        return super().clean()
 
 
 class RegisterForm(UserCreationForm):
@@ -643,21 +751,42 @@ class RegisterForm(UserCreationForm):
     email = forms.EmailField(
         label=_("Email (опционально)"),
         required=False,
+        widget=forms.EmailInput(attrs={"class": "ps-input"}),
     )
     phone = forms.CharField(
         label=_("Телефон (опционально)"),
         required=False,
+        widget=forms.TextInput(attrs={"class": "ps-input"}),
     )
 
     class Meta(UserCreationForm.Meta):
         model = User
         fields = ("username", "email", "phone")
+        widgets = {
+            "username": forms.TextInput(attrs={"class": "ps-input"}),
+        }
+
+    def clean_email(self) -> str:
+        email = (self.cleaned_data.get("email") or "").strip()
+        if not email:
+            return ""
+        email = email.lower()
+        if User.objects.filter(email_encrypted=email).exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким email уже зарегистрирован.")
+            )
+        return email
 
     def clean_phone(self) -> str:
         phone = self.cleaned_data.get("phone")
         if not phone:
             return ""
-        return normalize_phone(phone)
+        phone_norm = normalize_phone(phone)
+        if User.objects.filter(phone_encrypted=phone_norm).exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким телефоном уже зарегистрирован.")
+            )
+        return phone_norm
 
     def save(self, commit: bool = True) -> User:
         user: User = super().save(commit=False)
@@ -677,8 +806,16 @@ class ProfileForm(forms.ModelForm):
     Редактирование профиля (email/телефон).
     """
 
-    email = forms.EmailField(label=_("Email"), required=False)
-    phone = forms.CharField(label=_("Телефон"), required=False)
+    email = forms.EmailField(
+        label=_("Email"),
+        required=False,
+        widget=forms.EmailInput(attrs={"class": "ps-input"}),
+    )
+    phone = forms.CharField(
+        label=_("Телефон"),
+        required=False,
+        widget=forms.TextInput(attrs={"class": "ps-input"}),
+    )
 
     class Meta:
         model = User
@@ -692,11 +829,33 @@ class ProfileForm(forms.ModelForm):
             initial.setdefault("phone", user.phone_plain)
         super().__init__(*args, **kwargs)
 
+    def clean_email(self) -> str:
+        email = (self.cleaned_data.get("email") or "").strip()
+        if not email:
+            return ""
+        email = email.lower()
+        qs = User.objects.filter(email_encrypted=email)
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким email уже зарегистрирован.")
+            )
+        return email
+
     def clean_phone(self) -> str:
         phone = self.cleaned_data.get("phone")
         if not phone:
             return ""
-        return normalize_phone(phone)
+        phone_norm = normalize_phone(phone)
+        qs = User.objects.filter(phone_encrypted=phone_norm)
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким телефоном уже зарегистрирован.")
+            )
+        return phone_norm
 
     def save(self, commit: bool = True) -> User:
         user: User = super().save(commit=False)
@@ -823,10 +982,12 @@ class User(AbstractUser):
 # accounts/serializers.py
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from core.utils import normalize_phone
+from .auth import find_user_by_identifier
 from .models import User
 
 
@@ -876,7 +1037,32 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ("id", "username", "role", "email", "phone")
 
     def validate_phone(self, value: str) -> str:
-        return normalize_phone(value)
+        value = normalize_phone(value)
+        user = self.instance
+        if not value:
+            return ""
+        qs = User.objects.filter(phone_encrypted=value)
+        if user is not None:
+            qs = qs.exclude(pk=user.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                _("Пользователь с таким телефоном уже существует.")
+            )
+        return value
+
+    def validate_email(self, value: str) -> str:
+        value = (value or "").strip().lower()
+        if not value:
+            return ""
+        user = self.instance
+        qs = User.objects.filter(email_encrypted=value)
+        if user is not None:
+            qs = qs.exclude(pk=user.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                _("Пользователь с таким email уже существует.")
+            )
+        return value
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -896,8 +1082,29 @@ class RegisterSerializer(serializers.Serializer):
             )
         return value
 
+    def validate_email(self, value: str) -> str:
+        value = (value or "").strip().lower()
+        if not value:
+            return ""
+        if User.objects.filter(email_encrypted=value).exists():
+            raise serializers.ValidationError(
+                _("Пользователь с таким email уже зарегистрирован.")
+            )
+        return value
+
     def validate_phone(self, value: str) -> str:
-        return normalize_phone(value)
+        value = normalize_phone(value)
+        if not value:
+            return ""
+        if User.objects.filter(phone_encrypted=value).exists():
+            raise serializers.ValidationError(
+                _("Пользователь с таким телефоном уже зарегистрирован.")
+            )
+        return value
+
+    def validate_password(self, value: str) -> str:
+        validate_password(value)
+        return value
 
     def create(self, validated_data: dict) -> User:
         email = validated_data.pop("email", "")
@@ -915,29 +1122,80 @@ class RegisterSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     """
     Логин через API (session-based).
+    Позволяет использовать логин, email или телефон.
     """
 
-    username = serializers.CharField()
+    identifier = serializers.CharField(
+        label=_("Логин / Email / Телефон"),
+    )
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs: dict) -> dict:
-        username = attrs.get("username")
+        identifier = attrs.get("identifier")
         password = attrs.get("password")
-        if username and password:
-            user = authenticate(username=username, password=password)
-            if not user:
-                raise serializers.ValidationError(
-                    _("Неверный логин или пароль."), code="authorization"
-                )
-            if not user.is_active:
-                raise serializers.ValidationError(
-                    _("Пользователь деактивирован."), code="authorization"
-                )
-            attrs["user"] = user
-            return attrs
-        raise serializers.ValidationError(
-            _("Необходимо указать логин и пароль."), code="authorization"
-        )
+
+        if not identifier or not password:
+            raise serializers.ValidationError(
+                _("Необходимо указать логин и пароль."), code="authorization"
+            )
+
+        user = find_user_by_identifier(identifier)
+        if not user or not user.check_password(password):
+            raise serializers.ValidationError(
+                _("Неверный логин (имя, email или телефон) или пароль."),
+                code="authorization",
+            )
+
+        if not user.is_active:
+            raise serializers.ValidationError(
+                _("Пользователь деактивирован."), code="authorization"
+            )
+
+        attrs["user"] = user
+        return attrs
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Смена пароля текущего пользователя.
+    """
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_new_password(self, value: str) -> str:
+        user = self.context["request"].user
+        validate_password(value, user=user)
+        return value
+
+    def validate(self, attrs: dict) -> dict:
+        user = self.context["request"].user
+        old_password = attrs.get("old_password")
+        if not user.check_password(old_password):
+            raise serializers.ValidationError(
+                {"old_password": _("Неверный текущий пароль.")}
+            )
+        return attrs
+
+    def save(self, **kwargs) -> User:
+        user = self.context["request"].user
+        new_password = self.validated_data["new_password"]
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        return user
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """
+    Запрос на сброс пароля по email (API).
+    """
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value: str) -> str:
+        value = (value or "").strip().lower()
+        # В целях безопасности не раскрываем, существует ли пользователь.
+        return value
 
 
 ################################################################################
@@ -946,7 +1204,8 @@ class LoginSerializer(serializers.Serializer):
 
 # accounts/urls.py
 
-from django.urls import path
+from django.contrib.auth import views as auth_views
+from django.urls import path, reverse_lazy
 
 from .views import CustomLoginView, ProfileView, RegisterView, logout_view
 
@@ -957,6 +1216,57 @@ urlpatterns = [
     path("logout/", logout_view, name="logout"),
     path("register/", RegisterView.as_view(), name="register"),
     path("profile/", ProfileView.as_view(), name="profile"),
+
+    # Смена пароля (HTML)
+    path(
+        "password/change/",
+        auth_views.PasswordChangeView.as_view(
+            template_name="accounts/password_change.html",
+            success_url=reverse_lazy("accounts:password_change_done"),
+        ),
+        name="password_change",
+    ),
+    path(
+        "password/change/done/",
+        auth_views.PasswordChangeDoneView.as_view(
+            template_name="accounts/password_change_done.html"
+        ),
+        name="password_change_done",
+    ),
+
+    # Сброс пароля (HTML)
+    path(
+        "password/reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="accounts/password_reset.html",
+            email_template_name="accounts/password_reset_email.txt",
+            subject_template_name="accounts/password_reset_subject.txt",
+            success_url=reverse_lazy("accounts:password_reset_done"),
+        ),
+        name="password_reset",
+    ),
+    path(
+        "password/reset/done/",
+        auth_views.PasswordResetDoneView.as_view(
+            template_name="accounts/password_reset_done.html"
+        ),
+        name="password_reset_done",
+    ),
+    path(
+        "reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="accounts/password_reset_confirm.html",
+            success_url=reverse_lazy("accounts:password_reset_complete"),
+        ),
+        name="password_reset_confirm",
+    ),
+    path(
+        "reset/done/",
+        auth_views.PasswordResetCompleteView.as_view(
+            template_name="accounts/password_reset_complete.html"
+        ),
+        name="password_reset_complete",
+    ),
 ]
 
 
@@ -971,6 +1281,7 @@ from typing import Any
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView as DjangoLoginView
+from django.contrib.auth.forms import PasswordResetForm
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
@@ -981,10 +1292,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from core.permissions import IsSelfOrAdmin
-from .forms import ProfileForm, RegisterForm
+from .forms import LoginForm, ProfileForm, RegisterForm
 from .models import User
 from .serializers import (
+    ChangePasswordSerializer,
     LoginSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     UserProfileSerializer,
     UserSerializer,
@@ -1034,10 +1347,11 @@ class ProfileView(LoginRequiredMixin, UpdateView):
 
 class CustomLoginView(DjangoLoginView):
     """
-    Обёртка над стандартным LoginView с русским шаблоном.
+    Обёртка над стандартным LoginView с русским шаблоном и кастомной формой.
     """
 
     template_name = "accounts/login.html"
+    form_class = LoginForm
 
     def get_success_url(self) -> str:
         return reverse("user_dashboard")
@@ -1056,27 +1370,30 @@ class UserViewSet(viewsets.ModelViewSet):
     API для работы с пользователями.
 
     Маршруты:
-    - /api/accounts/users/             (GET)   — список (только админ)
-    - /api/accounts/users/{id}/        (GET)   — профиль (сам или админ)
-    - /api/accounts/users/me/          (GET)   — профиль текущего пользователя
-    - /api/accounts/users/me/          (PATCH) — обновление своего профиля
-    - /api/accounts/users/register/    (POST)  — регистрация
-    - /api/accounts/users/login/       (POST)  — логин (session-based)
-    - /api/accounts/users/logout/      (POST)  — логаут
+    - /api/accounts/users/                   (GET)   — список (только админ)
+    - /api/accounts/users/{id}/              (GET)   — профиль (сам или админ)
+    - /api/accounts/users/me/                (GET)   — профиль текущего пользователя
+    - /api/accounts/users/me/                (PATCH) — обновление своего профиля
+    - /api/accounts/users/register/          (POST)  — регистрация
+    - /api/accounts/users/login/             (POST)  — логин (session-based)
+    - /api/accounts/users/logout/            (POST)  — логаут
+    - /api/accounts/users/change-password/   (POST)  — смена пароля (API)
+    - /api/accounts/users/reset-password/    (POST)  — запрос сброса пароля по email
     """
 
     queryset = User.objects.all().order_by("-date_joined")
     serializer_class = UserSerializer
 
     def get_permissions(self) -> list[Any]:
-        if self.action in ("register", "login"):
+        if self.action in ("register", "login", "reset_password"):
             permission_classes = [permissions.AllowAny]
         elif self.action in ("list", "destroy"):
             permission_classes = [permissions.IsAdminUser]
-        elif self.action in ("me", "partial_update", "update", "retrieve", "logout"):
-            permission_classes = [permissions.IsAuthenticated, IsSelfOrAdmin]
-        else:
+        elif self.action in ("me", "change_password", "logout"):
             permission_classes = [permissions.IsAuthenticated]
+        else:
+            # retrieve/update/partial_update — только сам пользователь или админ
+            permission_classes = [permissions.IsAuthenticated, IsSelfOrAdmin]
         return [perm() for perm in permission_classes]
 
     def get_queryset(self):
@@ -1141,6 +1458,54 @@ class UserViewSet(viewsets.ModelViewSet):
         auth_logout(request)
         return Response(
             {"detail": "Вы вышли из системы."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=False, methods=["post"], url_path="change-password")
+    def change_password(self, request):
+        """
+        Смена пароля текущего пользователя (API).
+        """
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"detail": "Пароль успешно изменён."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="reset-password")
+    def reset_password(self, request):
+        """
+        Запрос на сброс пароля по email (API).
+
+        Использует стандартный PasswordResetForm и отправляет письмо
+        через настроенный EMAIL_BACKEND.
+        """
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        form = PasswordResetForm(data={"email": email})
+        if form.is_valid():
+            form.save(
+                request=request,
+                use_https=request.is_secure(),
+                email_template_name="accounts/password_reset_email.txt",
+                subject_template_name="accounts/password_reset_subject.txt",
+            )
+
+        # Независимо от результата говорим одно и то же, чтобы не раскрывать,
+        # существует ли пользователь с таким email.
+        return Response(
+            {
+                "detail": (
+                    "Если пользователь с таким email существует, на него отправлена "
+                    "инструкция по сбросу пароля."
+                )
+            },
+            status=status.HTTP_200_OK,
         )
 
 
@@ -1245,7 +1610,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from backend.backend.parking.models import Booking
+from parking.models import Booking
 
 
 def bookings_dataframe() -> pd.DataFrame:
@@ -1268,12 +1633,12 @@ def bookings_dataframe() -> pd.DataFrame:
                 "spot_id": str(b.spot_id),
                 "lot_id": str(b.spot.lot_id),
                 "city": b.spot.lot.city,
-                "start": b.start,
-                "end": b.end,
-                "duration_hours": b.duration_hours,
+                "start": b.start_at,
+                "end": b.end_at,
+                "duration_hours": (b.end_at - b.start_at).total_seconds() / 3600.0,
                 "price": float(b.total_price),
-                "dow": b.start.weekday(),
-                "hour": b.start.hour,
+                "dow": b.start_at.weekday(),
+                "hour": b.start_at.hour,
             }
         )
 
@@ -1306,8 +1671,8 @@ from django.conf import settings
 from django.utils import timezone
 from sklearn.ensemble import RandomForestRegressor
 
-from backend.backend.core.utils import round_price
-from backend.backend.parking.models import ParkingSpot
+from core.utils import round_price
+from parking.models import ParkingSpot
 from .features import bookings_dataframe
 
 MODEL_PATH = Path(getattr(settings, "BASE_DIR", ".")) / "ai_models" / "pricing_model.pkl"
@@ -1354,10 +1719,10 @@ def recommend_price_for_spot(spot: ParkingSpot) -> Optional[Dict[str, Any]]:
     Возвращает диапазон рекомендованных цен для владельца места.
     Учитывает:
     - базовую цену;
-    - загрузку места за 7 дней;
+    - загрузку места за 7 дней (occupancy_7d);
     - (по возможности) предсказание ML‑модели.
     """
-    base_price = float(spot.price_hour or 0.0)
+    base_price = float(spot.hourly_price or 0.0)
     if base_price <= 0:
         return None
 
@@ -1374,7 +1739,7 @@ def recommend_price_for_spot(spot: ParkingSpot) -> Optional[Dict[str, Any]]:
         except Exception:
             predicted = None
 
-    occupancy = float(spot.occupancy_7d)
+    occupancy = float(getattr(spot, "occupancy_7d", 0.0) or 0.0)
     factor = 1.0
     reason_parts = []
 
@@ -1418,9 +1783,14 @@ def recommend_price_for_spot(spot: ParkingSpot) -> Optional[Dict[str, Any]]:
 # File: ai\tasks.py
 ################################################################################
 
-from celery import shared_task
+from __future__ import annotations
 
-from backend.backend.parking.models import ParkingLot
+from datetime import timedelta
+
+from celery import shared_task
+from django.utils import timezone
+
+from parking.models import Booking, ParkingLot, ParkingSpot
 from .features import bookings_dataframe
 from .pricing import train_pricing_model
 
@@ -1428,19 +1798,60 @@ from .pricing import train_pricing_model
 @shared_task
 def update_models() -> None:
     """
-    Периодически обучает модель цен и обновляет стресс-индексы по паркингам.
+    Периодически обучает модель цен и обновляет метрики загруженности.
+
+    Делает три вещи:
+    1) обучает/переобучает ML‑модель ценообразования;
+    2) считает occupancy_7d для активных мест;
+    3) считает stress_index для парковок (средняя загрузка мест).
     """
     df = bookings_dataframe()
     train_pricing_model(df)
 
-    lots = ParkingLot.objects.filter(is_active=True)
+    now = timezone.now()
+    window_start = now - timedelta(days=7)
+
+    # 1–2. Обновляем occupancy_7d для мест
+    active_spots = ParkingSpot.objects.filter(
+        status=ParkingSpot.SpotStatus.ACTIVE,
+        lot__is_active=True,
+        lot__is_approved=True,
+    ).select_related("lot")
+
+    total_period_hours = 24 * 7
+
+    for spot in active_spots:
+        qs = Booking.objects.filter(
+            spot=spot,
+            start_at__lt=now,
+            end_at__gt=window_start,
+            status__in=[
+                Booking.Status.CONFIRMED,
+                Booking.Status.ACTIVE,
+                Booking.Status.COMPLETED,
+            ],
+        )
+
+        booked_hours = 0.0
+        for b in qs:
+            start = max(b.start_at, window_start)
+            end = min(b.end_at, now)
+            delta_h = max((end - start).total_seconds() / 3600.0, 0.0)
+            booked_hours += delta_h
+
+        occupancy = booked_hours / float(total_period_hours)
+        spot.occupancy_7d = max(0.0, min(occupancy, 1.0))
+        spot.save(update_fields=["occupancy_7d"])
+
+    # 3. Индекс загруженности по объектам парковки
+    lots = ParkingLot.objects.filter(is_active=True, is_approved=True)
     for lot in lots:
         spots = lot.spots.all()
         if not spots:
             lot.stress_index = 0.0
             lot.save(update_fields=["stress_index"])
             continue
-        values = [max(0.0, min(spot.occupancy_7d, 1.0)) for spot in spots]
+        values = [max(0.0, min(s.occupancy_7d, 1.0)) for s in spots]
         lot.stress_index = sum(values) / len(values)
         lot.save(update_fields=["stress_index"])
 
@@ -1513,7 +1924,7 @@ import sys
 
 def main() -> None:
     """Run administrative tasks."""
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.config.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
@@ -1552,7 +1963,7 @@ import os
 
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.config.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
 
 application = get_asgi_application()
 
@@ -1565,7 +1976,7 @@ import os
 
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.config.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
 
 app = Celery("backend")
 
@@ -1582,248 +1993,8 @@ def debug_task(self):
 
 
 ################################################################################
-# File: backend\backend\config\settings.py
-################################################################################
-
-import os
-from pathlib import Path
-from typing import List
-
-import environ
-
-# Базовая директория Django-проекта (backend/)
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-# Корень репозитория (где лежат templates/ и static/)
-PROJECT_ROOT = BASE_DIR.parent
-
-# Настройка окружения через django-environ
-env = environ.Env(
-    DEBUG=(bool, False),
-)
-
-# Читаем .env, если он существует
-env_file = PROJECT_ROOT / ".env"
-if env_file.exists():
-    environ.Env.read_env(str(env_file))
-
-DEBUG: bool = env.bool("DEBUG", default=False)
-SECRET_KEY: str = env("SECRET_KEY", default="unsafe-secret-key-change-me")
-
-ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["*"])
-
-# Приложения Django
-INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-
-    # Сторонние
-    "rest_framework",
-    "corsheaders",
-    "django_cryptography",
-
-    # Проектные
-    "accounts",
-    "vehicles",
-    "parking",
-    "payments",
-    "ai",
-    "core",
-]
-
-MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
-    "django.middleware.security.SecurityMiddleware",
-    "django.middleware.gzip.GZipMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
-    "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
-]
-
-ROOT_URLCONF = "backend.config.urls"
-
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [PROJECT_ROOT / "templates"],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    },
-]
-
-WSGI_APPLICATION = "backend.config.wsgi.application"
-ASGI_APPLICATION = "backend.config.asgi.application"
-
-# База данных (Postgres/PostGIS для продакшена, SQLite по умолчанию)
-DATABASES = {
-    "default": env.db(
-        "DATABASE_URL", default=f"sqlite:///{PROJECT_ROOT / 'db.sqlite3'}"
-    )
-}
-
-# Подмена engine на PostGIS, если используем PostgreSQL
-if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
-    DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
-
-# Пользователь
-AUTH_USER_MODEL = "accounts.User"
-
-# Пароли
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-        "OPTIONS": {"min_length": 8},
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
-]
-
-# Локализация
-LANGUAGE_CODE = env("LANGUAGE_CODE", default="ru-ru")
-TIME_ZONE = env("TIME_ZONE", default="Europe/Moscow")
-USE_I18N = True
-USE_L10N = True
-USE_TZ = True
-
-# Static & media
-STATIC_URL = "/static/"
-STATIC_ROOT = PROJECT_ROOT / "staticfiles"
-STATICFILES_DIRS = [
-    PROJECT_ROOT / "static",
-]
-
-MEDIA_URL = "/media/"
-MEDIA_ROOT = PROJECT_ROOT / "media"
-
-# PWA‑цвета (для meta и manifest)
-PWA_APP_NAME = "ParkShare RU"
-PWA_APP_SHORT_NAME = "ParkShare"
-PWA_THEME_COLOR = "#0d6efd"
-PWA_BACKGROUND_COLOR = "#ffffff"
-
-# DRF
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
-    ],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticatedOrReadOnly",
-    ],
-    "DEFAULT_PAGINATION_CLASS": "core.pagination.DefaultPageNumberPagination",
-    "PAGE_SIZE": 20,
-}
-
-# CORS (минимальный дефолт)
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
-
-# Redis / Celery
-REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
-
-CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
-CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = TIME_ZONE
-
-CELERY_BEAT_SCHEDULE = {
-    "expire_unpaid_bookings": {
-        "task": "parking.tasks.expire_unpaid_bookings",
-        "schedule": 60 * 10,  # каждые 10 минут
-    },
-    "recalculate_ai_analytics": {
-        "task": "ai.tasks.recalculate_analytics",
-        "schedule": 60 * 30,  # каждые 30 минут
-    },
-}
-
-# Логи
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "[{asctime}] {levelname} {name} {message}",
-            "style": "{",
-        },
-        "simple": {
-            "format": "{levelname} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": "INFO",
-        },
-        "parkshare": {
-            "handlers": ["console"],
-            "level": "INFO",
-        },
-    },
-}
-
-# Безопасность (для продакшена переопределяется в .env)
-SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
-SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
-CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=False)
-X_FRAME_OPTIONS = "DENY"
-
-# Настройки шифрования (django-cryptography)
-DJANGO_CRYPTography_KEY = SECRET_KEY  # используется библиотекой для симметричного шифрования
-
-# Соль для номеров машин
-VEHICLE_PLATE_SALT = env("VEHICLE_PLATE_SALT", default="change_me_vehicle_salt")
-
-# Настройки YooKassa (пример, используются в payments.providers)
-YOOKASSA_SHOP_ID = env("YOOKASSA_SHOP_ID", default="")
-YOOKASSA_SECRET_KEY = env("YOOKASSA_SECRET_KEY", default="")
-YOOKASSA_RETURN_URL = env("YOOKASSA_RETURN_URL", default="")
-YOOKASSA_WEBHOOK_SECRET = env("YOOKASSA_WEBHOOK_SECRET", default="")
-
-# Комиссия сервиса (процент)
-SERVICE_COMMISSION_PERCENT = env.int("SERVICE_COMMISSION_PERCENT", default=10)
-
-# Кэш (по умолчанию локальный in‑memory, в проде можно переключить на Redis)
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "parkshare_cache",
-    }
-}
-
-
-################################################################################
 # File: backend\backend\config\urls.py
 ################################################################################
-
-from pathlib import Path
 
 from django.conf import settings
 from django.conf.urls.static import static
@@ -1833,14 +2004,18 @@ from django.http import Http404, HttpResponse
 from django.urls import include, path
 from django.views.decorators.cache import never_cache
 from django.views.generic import TemplateView
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
 from rest_framework import routers
 
 from accounts import views as accounts_api
-from vehicles import views as vehicles_api
+from ai import views as ai_api
 from parking import views as parking_views
 from payments import views as payments_api
-from ai import views as ai_api
-
+from vehicles import views as vehicles_api
 
 router = routers.DefaultRouter()
 
@@ -1850,7 +2025,7 @@ router.register(r"accounts/users", accounts_api.UserViewSet, basename="user")
 # Vehicles
 router.register(r"vehicles", vehicles_api.VehicleViewSet, basename="vehicle")
 
-# Parking (основные модельные вьюсеты)
+# Parking
 router.register(r"parking/lots", parking_views.ParkingLotViewSet, basename="parking-lot")
 router.register(r"parking/spots", parking_views.ParkingSpotViewSet, basename="parking-spot")
 router.register(r"parking/bookings", parking_views.BookingViewSet, basename="booking")
@@ -1865,8 +2040,6 @@ router.register(r"payments", payments_api.PaymentViewSet, basename="payment")
 def service_worker(request):
     """
     Отдаём service-worker.js с корня домена, но физически он лежит в static/.
-
-    Это нужно, чтобы scope service worker распространялся на весь сайт.
     """
     path = finders.find("service-worker.js")
     if not path:
@@ -1902,11 +2075,24 @@ urlpatterns = [
     path("кабинет-владельца/", parking_views.OwnerDashboardView.as_view(), name="owner_dashboard"),
     path("offline/", TemplateView.as_view(template_name="offline.html"), name="offline"),
 
-    # Auth страницы (регистрация/логин)
+    # Auth страницы (регистрация/логин/сброс пароля)
     path("accounts/", include("accounts.urls")),
 
     # API (DRF router)
     path("api/", include(router.urls)),
+
+    # OpenAPI / документация
+    path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(url_name="api-schema"),
+        name="api-docs",
+    ),
+    path(
+        "api/docs/redoc/",
+        SpectacularRedocView.as_view(url_name="api-schema"),
+        name="api-docs-redoc",
+    ),
 
     # AI API
     path("api/ai/recommendations/", ai_api.RecommendationsAPIView.as_view(), name="ai_recommendations"),
@@ -1933,9 +2119,536 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.config.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
 
 application = get_wsgi_application()
+
+
+################################################################################
+# File: backend\backend\settings\__init__.py
+################################################################################
+
+"""
+Пакет настроек Django.
+
+По умолчанию используются настройки для локальной разработки
+(`backend.settings.local`).
+
+Для продакшена задайте переменную окружения:
+
+    DJANGO_SETTINGS_MODULE=backend.settings.production
+"""
+
+from .local import *  # noqa: F401,F403
+
+
+################################################################################
+# File: backend\backend\settings\base.py
+################################################################################
+
+import os
+from pathlib import Path
+from typing import List
+
+import environ
+
+# ---------------------------------------------------------------------------
+# Пути
+# ---------------------------------------------------------------------------
+
+# BASE_DIR — корень репозитория: C:\Users\Sultan\Downloads\parkshare_ru_part1
+BASE_DIR = Path(__file__).resolve().parents[3]
+
+# Тут главная правка: больше не уходим на уровень выше
+PROJECT_ROOT = BASE_DIR  # C:\Users\Sultan\Downloads\parkshare_ru_part1
+
+
+# ---------------------------------------------------------------------------
+# Окружение
+# ---------------------------------------------------------------------------
+
+env = environ.Env(
+    DEBUG=(bool, False),
+)
+
+env_file = PROJECT_ROOT / ".env"
+if env_file.exists():
+    environ.Env.read_env(str(env_file))
+
+DEBUG: bool = env.bool("DEBUG", default=False)
+SECRET_KEY: str = env("SECRET_KEY", default="unsafe-secret-key-change-me")
+
+ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+
+# ---------------------------------------------------------------------------
+# Приложения
+# ---------------------------------------------------------------------------
+
+INSTALLED_APPS = [
+    # Django
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+
+    # Сторонние
+    "rest_framework",
+    "corsheaders",
+    "django_cryptography",
+    "drf_spectacular",
+
+    # Проектные
+    "accounts",
+    "vehicles",
+    "parking",
+    "payments",
+    "ai",
+    "core",
+]
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "django.middleware.gzip.GZipMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "backend.config.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "backend.config.wsgi.application"
+ASGI_APPLICATION = "backend.config.asgi.application"
+
+# ---------------------------------------------------------------------------
+# Базы данных
+# ---------------------------------------------------------------------------
+
+DATABASES = {
+    "default": env.db(
+        "DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+    )
+}
+
+# Если используем PostgreSQL — переключаемся на PostGIS
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
+
+# ---------------------------------------------------------------------------
+# Пользователь / аутентификация
+# ---------------------------------------------------------------------------
+
+AUTH_USER_MODEL = "accounts.User"
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Локализация
+# ---------------------------------------------------------------------------
+
+LANGUAGE_CODE = env("LANGUAGE_CODE", default="ru-ru")
+TIME_ZONE = env("TIME_ZONE", default="Europe/Moscow")
+USE_I18N = True
+USE_L10N = True
+USE_TZ = True
+
+# ---------------------------------------------------------------------------
+# Статика / медиа
+# ---------------------------------------------------------------------------
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# ---------------------------------------------------------------------------
+# PWA
+# ---------------------------------------------------------------------------
+
+PWA_APP_NAME = "ParkShare RU"
+PWA_APP_SHORT_NAME = "ParkShare"
+PWA_THEME_COLOR = "#0d6efd"
+PWA_BACKGROUND_COLOR = "#050816"
+
+# ---------------------------------------------------------------------------
+# DRF / OpenAPI
+# ---------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticatedOrReadOnly",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "core.pagination.DefaultPageNumberPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "ParkShare RU API",
+    "DESCRIPTION": "API сервиса бронирования парковочных мест ParkShare RU.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Redis / Celery
+# ---------------------------------------------------------------------------
+
+REDIS_URL = env("REDIS_URL", default="redis://redis:6379/0")
+
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    "expire_unpaid_bookings": {
+        "task": "parking.tasks.expire_unpaid_bookings",
+        "schedule": 60 * 10,  # каждые 10 минут
+    },
+    "update_ai_models": {
+        "task": "ai.tasks.update_models",
+        "schedule": 60 * 60,  # раз в час
+    },
+    "check_stale_payments": {
+        "task": "payments.tasks.check_stale_payments",
+        "schedule": 60 * 15,  # каждые 15 минут
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Логи
+# ---------------------------------------------------------------------------
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+        "parkshare": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Email
+# ---------------------------------------------------------------------------
+
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default="ParkShare RU <noreply@example.com>",
+)
+SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+
+# ---------------------------------------------------------------------------
+# Безопасность (базовый уровень, детали переопределяются в production.py)
+# ---------------------------------------------------------------------------
+
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=False)
+X_FRAME_OPTIONS = "DENY"
+
+# ---------------------------------------------------------------------------
+# django-cryptography
+# ---------------------------------------------------------------------------
+
+DJANGO_CRYPTography_KEY = SECRET_KEY
+
+# ---------------------------------------------------------------------------
+# Бизнес-настройки
+# ---------------------------------------------------------------------------
+
+VEHICLE_PLATE_SALT = env("VEHICLE_PLATE_SALT", default="change_me_vehicle_salt")
+
+YOOKASSA_SHOP_ID = env("YOOKASSA_SHOP_ID", default="")
+YOOKASSA_SECRET_KEY = env("YOOKASSA_SECRET_KEY", default="")
+YOOKASSA_RETURN_URL = env("YOOKASSA_RETURN_URL", default="")
+YOOKASSA_WEBHOOK_SECRET = env("YOOKASSA_WEBHOOK_SECRET", default="")
+
+SERVICE_COMMISSION_PERCENT = env.int("SERVICE_COMMISSION_PERCENT", default=10)
+
+# ---------------------------------------------------------------------------
+# Кэш по умолчанию — in-memory (в продакшене можно переключить на Redis)
+# ---------------------------------------------------------------------------
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "parkshare_cache",
+    }
+}
+
+
+################################################################################
+# File: backend\backend\settings\local.py
+################################################################################
+
+from .base import *  # noqa: F401,F403
+
+# Локальная разработка
+
+DEBUG = env.bool("DEBUG", default=True)
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
+
+INTERNAL_IPS = ["127.0.0.1"]
+
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+
+################################################################################
+# File: backend\backend\settings\production.py
+################################################################################
+
+from django.core.exceptions import ImproperlyConfigured
+
+from .base import *  # noqa: F401,F403
+
+# Продакшен-настройки
+
+DEBUG = False
+
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "В продакшене ALLOWED_HOSTS не должен быть пустым. "
+        "Задайте ALLOWED_HOSTS в .env"
+    )
+
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=True)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=True)
+
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=60 * 60 * 24)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+
+
+################################################################################
+# File: backend\tests\__init__.py
+################################################################################
+
+# Пакет с базовыми тестами проекта ParkShare RU.
+
+
+################################################################################
+# File: backend\tests\test_auth_api.py
+################################################################################
+
+from django.test import TestCase
+from rest_framework.test import APIClient
+
+
+class AuthApiTests(TestCase):
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123"
+
+    def test_register_and_login_by_username_email_and_phone(self):
+        # Регистрация
+        resp = self.client.post(
+            "/api/accounts/users/register/",
+            {
+                "username": "demo",
+                "password": self.password,
+                "email": "demo@example.com",
+                "phone": "+7 (999) 123-45-67",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.client.logout()
+
+        # Логин по логину
+        resp = self.client.post(
+            "/api/accounts/users/login/",
+            {"identifier": "demo", "password": self.password},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["username"], "demo")
+        self.client.logout()
+
+        # Логин по email
+        resp = self.client.post(
+            "/api/accounts/users/login/",
+            {"identifier": "demo@example.com", "password": self.password},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.client.logout()
+
+        # Логин по телефону (в любом удобном формате)
+        resp = self.client.post(
+            "/api/accounts/users/login/",
+            {"identifier": "+7 999 123-45-67", "password": self.password},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+
+################################################################################
+# File: backend\tests\test_booking_model.py
+################################################################################
+
+from datetime import timedelta
+from decimal import Decimal
+
+from django.test import TestCase
+from django.utils import timezone
+
+from accounts.models import User
+from parking.models import Booking, ParkingLot, ParkingSpot
+
+
+class BookingModelTests(TestCase):
+    def setUp(self) -> None:
+        self.owner = User.objects.create_user(
+            username="owner",
+            password="StrongPass123",
+            role=User.Role.OWNER,
+        )
+        self.driver = User.objects.create_user(
+            username="driver",
+            password="StrongPass123",
+            role=User.Role.DRIVER,
+        )
+
+        self.lot = ParkingLot.objects.create(
+            owner=self.owner,
+            name="Test Lot",
+            city="Test City",
+            address="Test street, 1",
+        )
+        self.spot = ParkingSpot.objects.create(
+            lot=self.lot,
+            name="A1",
+            hourly_price=Decimal("100.00"),
+        )
+
+    def test_calculate_price_hourly_with_commission(self):
+        now = timezone.now()
+        booking = Booking(
+            user=self.driver,
+            spot=self.spot,
+            booking_type=Booking.BookingType.HOURLY,
+            start_at=now,
+            end_at=now + timedelta(hours=1, minutes=30),
+            total_price=Decimal("0.00"),
+            currency="RUB",
+        )
+        total = booking.calculate_price()
+        # 2 часа * 100 ₽ + 10% комиссии = 220
+        self.assertEqual(total, Decimal("220.00"))
+
+    def test_is_spot_available(self):
+        now = timezone.now()
+        existing = Booking.objects.create(
+            user=self.driver,
+            spot=self.spot,
+            booking_type=Booking.BookingType.HOURLY,
+            start_at=now,
+            end_at=now + timedelta(hours=2),
+            status=Booking.Status.CONFIRMED,
+            total_price=Decimal("200.00"),
+            currency="RUB",
+        )
+
+        # Пересекающийся интервал — недоступен
+        self.assertFalse(
+            Booking.is_spot_available(
+                self.spot,
+                now + timedelta(minutes=30),
+                now + timedelta(hours=3),
+            )
+        )
+
+        # Непересекающийся интервал — доступен
+        self.assertTrue(
+            Booking.is_spot_available(
+                self.spot,
+                existing.end_at + timedelta(minutes=1),
+                existing.end_at + timedelta(hours=1),
+            )
+        )
 
 
 ################################################################################
@@ -2110,6 +2823,7 @@ class IsOwnerObject(BasePermission):
 
 import hashlib
 import math
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from django.conf import settings
@@ -2144,15 +2858,31 @@ def mask_plate_for_display(plate: str) -> str:
 
 def normalize_phone(phone: Optional[str]) -> str:
     """
-    Простейшая нормализация телефона: оставляем только цифры и ведущий '+'.
-    Используется только валидационно, сам телефон хранится зашифрованным.
+    Нормализация телефона:
+
+    - убираем все символы кроме цифр и '+';
+    - для РФ приводим к формату +7XXXXXXXXXX, если возможно;
+    - для остальных стран просто добавляем '+' перед цифрами.
     """
     if not phone:
         return ""
-    phone = phone.strip()
-    plus = "+" if phone.startswith("+") else ""
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    return plus + digits
+    raw = phone.strip()
+
+    # Оставляем плюс только в начале
+    plus = "+" if raw.startswith("+") else ""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ""
+
+    # РФ: 10 или 11 цифр, начинающихся с 8/7
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    elif len(digits) == 10:
+        digits = "7" + digits
+
+    if plus or digits.startswith("7"):
+        return "+" + digits
+    return "+" + digits  # простой фолбэк
 
 
 def haversine_distance_km(
@@ -2198,6 +2928,22 @@ def parse_float(value: Optional[str]) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def round_price(value: float | Decimal, step: float = 10.0) -> float:
+    """
+    Округляет цену к ближайшему шагу (step), по умолчанию — 10 ₽.
+
+    Используется в AI-модуле ценообразования.
+    """
+    if step <= 0:
+        return float(Decimal(str(value)).quantize(Decimal("0.01")))
+
+    v = Decimal(str(value))
+    step_dec = Decimal(str(step))
+    scaled = (v / step_dec).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    result = scaled * step_dec
+    return float(result)
 
 
 ################################################################################
@@ -2372,7 +3118,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from core.models import TimeStampedModel  # предполагается из Часть 2
+from core.models import TimeStampedModel
 
 
 # PointField с fallback для SQLite: храним JSON {"lat": ..., "lng": ...}
@@ -2434,6 +3180,15 @@ class ParkingLot(TimeStampedModel):
         "Приватный",
         default=False,
         help_text="Если включено, объект виден только по прямым ссылкам/владельцу.",
+    )
+
+    stress_index = models.FloatField(
+        "Индекс загруженности (0..1)",
+        default=0.0,
+        help_text=(
+            "Средняя загруженность мест за последние 7 дней. "
+            "Обновляется фоновыми задачами AI."
+        ),
     )
 
     class Meta:
@@ -2532,6 +3287,15 @@ class ParkingSpot(TimeStampedModel):
         max_length=16,
         choices=SpotStatus.choices,
         default=SpotStatus.ACTIVE,
+    )
+
+    occupancy_7d = models.FloatField(
+        "Загруженность за 7 дней (0..1)",
+        default=0.0,
+        help_text=(
+            "Доля времени, когда место было занято за последние 7 дней. "
+            "Обновляется фоновыми задачами AI."
+        ),
     )
 
     class Meta:
@@ -2728,7 +3492,9 @@ class Booking(TimeStampedModel):
         commission = (
             base_price * Decimal(commission_percent) / Decimal("100")
         ).quantize(Decimal("0.01"))
-        return (base_price + commission).quantize(Decimal("0.01"))
+        total = (base_price + commission).quantize(Decimal("0.01"))
+        self.total_price = total
+        return total
 
     def mark_paid(self, payment_id: str | None = None) -> None:
         """
@@ -4036,8 +4802,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     - если для брони уже существует платёж в статусе SUCCEEDED — новый
       платёж создать нельзя;
     - если платёж существует, но ещё неуспешен (CREATED/PENDING/FAILED/CANCELLED),
-      он переиспользуется: переинициализируется через YooKassa и возвращается
-      с новым payment_url.
+      он переиспользуется: заново инициализируется через YooKassa и возвращается
+      с актуальным payment_url.
     """
 
     payer = serializers.ReadOnlyField(source="payer.username")
@@ -4097,12 +4863,14 @@ class PaymentSerializer(serializers.ModelSerializer):
         # Бронь должна ожидать оплаты
         if booking.is_paid or booking.status != Booking.Status.PENDING:
             raise serializers.ValidationError(
-                "Платёж можно создать только для брони в статусе 'Ожидает оплаты'."
+                "Платёж можно создать только для брони в статусе «Ожидает оплаты»."
             )
 
-        # Бронь не должна быть отменена/истечь и не в прошлом
         now = timezone.now()
-        if booking.status in (Booking.Status.CANCELLED, Booking.Status.EXPIRED) or booking.end_at <= now:
+        if booking.status in (
+            Booking.Status.CANCELLED,
+            Booking.Status.EXPIRED,
+        ) or booking.end_at <= now:
             raise serializers.ValidationError(
                 "Нельзя создать платёж для отменённой, истекшей или прошлой брони."
             )
@@ -4370,29 +5138,20 @@ class Migration(migrations.Migration):
 
 from __future__ import annotations
 
-from django.conf import settings
+"""
+Единая точка входа для работы с YooKassa.
 
-from .base import PaymentProvider
-from .yookassa import (
-    YooKassaProvider,
-    YooKassaError,
-    create_yookassa_payment,
-)
+Используется PaymentSerializer через:
+
+    from .providers import YooKassaError, create_yookassa_payment
+"""
+
+from .yookassa import YooKassaError, create_yookassa_payment
 
 __all__ = [
-    "PaymentProvider",
-    "YooKassaProvider",
     "YooKassaError",
     "create_yookassa_payment",
-    "get_payment_provider",
 ]
-
-
-def get_payment_provider() -> PaymentProvider:
-    provider_name = getattr(settings, "PAYMENTS_PROVIDER", "yookassa")
-    if provider_name == "yookassa":
-        return YooKassaProvider()
-    raise ValueError(f"Неизвестный платёжный провайдер: {provider_name}")
 
 
 ################################################################################
@@ -4448,102 +5207,113 @@ class PaymentProvider(ABC):
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict
+import uuid
+from decimal import Decimal
+from typing import Any, Tuple
 
 from django.conf import settings
-from django.http import HttpRequest
-from yookassa import Configuration, Payment as YooPayment
+from django.core.exceptions import ImproperlyConfigured
 
-from ..models import Payment
-from .base import PaymentProvider
-
-logger = logging.getLogger(__name__)
+try:
+    # Официальный синхронный SDK YooKassa
+    from yookassa import Configuration, Payment as YooPayment  # type: ignore[import]
+except ImportError:  # pragma: no cover - мягкий фолбэк
+    Configuration = None
+    YooPayment = None
 
 
 class YooKassaError(Exception):
-    """Обёртка над ошибками платёжного провайдера."""
+    """Базовая ошибка при работе с YooKassa."""
     pass
 
 
-def _setup_yookassa() -> None:
+def _configure_yookassa() -> None:
     """
     Настраивает SDK YooKassa из Django settings.
 
-    Ожидает:
+    Требуются:
     - YOOKASSA_SHOP_ID
-    - YOOKASSA_API_KEY
+    - YOOKASSA_SECRET_KEY
     """
-    Configuration.account_id = getattr(settings, "YOOKASSA_SHOP_ID", None)
-    Configuration.secret_key = getattr(settings, "YOOKASSA_API_KEY", None)
+    if Configuration is None or YooPayment is None:
+        raise ImproperlyConfigured(
+            "Пакет 'yookassa' не установлен. Добавьте его в requirements.txt."
+        )
+
+    shop_id = getattr(settings, "YOOKASSA_SHOP_ID", "")
+    secret_key = getattr(settings, "YOOKASSA_SECRET_KEY", "")
+    if not shop_id or not secret_key:
+        raise ImproperlyConfigured(
+            "Не заданы YOOKASSA_SHOP_ID и/или YOOKASSA_SECRET_KEY в настройках."
+        )
+
+    Configuration.account_id = shop_id
+    Configuration.secret_key = secret_key
 
 
-class YooKassaProvider(PaymentProvider):
+def create_yookassa_payment(booking) -> Tuple[str, str, dict[str, Any]]:
     """
-    Платёжный провайдер YooKassa.
-    Ожидает, что Payment имеет поле `amount`.
+    Создаёт платёж в YooKassa для указанной брони.
+
+    Возвращает:
+        (payment_url, provider_payment_id, raw_response_dict)
+
+    Все сетевые вызовы инкапсулированы здесь.
     """
+    _configure_yookassa()
 
-    def create_payment(self, payment: Payment, return_url: str) -> Dict[str, Any]:
-        try:
-            _setup_yookassa()
+    from parking.models import Booking  # локальный импорт, чтобы избежать циклов
 
-            if not getattr(payment, "amount", None):
-                raise YooKassaError(
-                    "У Payment отсутствует поле amount — исправьте модель."
-                )
+    if not isinstance(booking, Booking):
+        raise YooKassaError("create_yookassa_payment ожидает экземпляр Booking.")
 
-            amount = {
-                "value": str(payment.amount),
-                "currency": "RUB",
-            }
+    amount = booking.total_price
+    if not isinstance(amount, Decimal):
+        amount = Decimal(str(amount))
 
-            data = {
-                "amount": amount,
-                "capture": True,
-                "confirmation": {
-                    "type": "redirect",
-                    "return_url": return_url,
-                },
-                "description": f"Оплата бронирования #{payment.id}",
-                "metadata": {"payment_id": str(payment.id)},
-            }
+    amount_str = str(amount.quantize(Decimal("0.01")))
+    currency = booking.currency or "RUB"
+    return_url = getattr(settings, "YOOKASSA_RETURN_URL", "")
 
-            y_payment = YooPayment.create(data)
+    description = f"Оплата брони #{booking.id} — {booking.spot}"
 
-            if hasattr(payment, "provider"):
-                payment.provider = "yookassa"
-            if hasattr(payment, "provider_payment_id"):
-                payment.provider_payment_id = y_payment.id
+    payload: dict[str, Any] = {
+        "amount": {
+            "value": amount_str,
+            "currency": currency,
+        },
+        "confirmation": {
+            "type": "redirect",
+            "return_url": return_url,
+        },
+        "capture": True,
+        "description": description,
+        "metadata": {
+            "booking_id": str(booking.id),
+            "user_id": str(booking.user_id),
+        },
+    }
 
-            payment.save(update_fields=["provider", "provider_payment_id"])
+    try:
+        payment = YooPayment.create(payload, uuid.uuid4())
+    except Exception as exc:  # noqa: BLE001
+        raise YooKassaError(str(exc)) from exc
 
-            try:
-                return y_payment.json()
-            except Exception:
-                return {
-                    "id": y_payment.id,
-                    "status": getattr(y_payment, "status", None),
-                    "amount": amount,
-                }
+    confirmation = getattr(payment, "confirmation", None)
+    payment_url = getattr(confirmation, "confirmation_url", None) if confirmation else None
+    provider_payment_id = getattr(payment, "id", None)
 
-        except YooKassaError:
-            raise
-        except Exception as exc:
-            logger.exception("Ошибка YooKassa")
-            raise YooKassaError(str(exc)) from exc
+    if not payment_url or not provider_payment_id:
+        raise YooKassaError(
+            "Некорректный ответ от YooKassa: не получены id или URL оплаты."
+        )
 
+    raw_response = {
+        "id": provider_payment_id,
+        "status": getattr(payment, "status", None),
+    }
 
-def create_yookassa_payment(
-    request: HttpRequest,
-    payment: Payment,
-    return_url: str,
-) -> Dict[str, Any]:
-    """
-    Функция для обратной совместимости.
-    """
-    provider = YooKassaProvider()
-    return provider.create_payment(payment=payment, return_url=return_url)
+    return payment_url, provider_payment_id, raw_response
 
 
 ################################################################################
@@ -6249,23 +7019,21 @@ img {
             {% endif %}
 
             {% for field in form.visible_fields %}
-    <div class="ps-form-row">
-        <label class="ps-form-label" for="{{ field.id_for_label }}">
-            {{ field.label }}
-        </label>
+                <div class="ps-form-row">
+                    <label class="ps-form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
 
-        {# просто рендерим поле #}
-        {{ field }}
+                    {{ field.as_widget(attrs={"class": "ps-input"}) }}
 
-        {% if field.help_text %}
-            <div class="ps-field-help">{{ field.help_text }}</div>
-        {% endif %}
-        {% for error in field.errors %}
-            <div class="ps-field-error">{{ error }}</div>
-        {% endfor %}
-    </div>
-{% endfor %}
-
+                    {% if field.help_text %}
+                        <div class="ps-field-help">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <div class="ps-field-error">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
 
             <div class="ps-form-actions">
                 <button type="submit" class="ps-btn ps-btn-full">
@@ -6277,10 +7045,269 @@ img {
         <div class="ps-auth-footer">
             Нет аккаунта?
             <a href="{% url 'accounts:register' %}">Зарегистрироваться</a>
+            <br>
+            <a href="{% url 'accounts:password_reset' %}">Забыли пароль?</a>
         </div>
     </div>
 </section>
 {% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_change.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Смена пароля — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-auth">
+    <div class="ps-auth-card ps-card ps-card--elevated ps-animate-fade-up">
+        <h1 class="ps-auth-title">Смена пароля</h1>
+        <p class="ps-auth-subtitle">
+            Укажите текущий пароль и новый — мы проверим его надёжность.
+        </p>
+
+        <form method="post" class="ps-form">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="ps-alert ps-alert--danger">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            {% for field in form.visible_fields %}
+                <div class="ps-form-row">
+                    <label class="ps-form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
+                    {{ field.as_widget(attrs={"class": "ps-input"}) }}
+                    {% if field.help_text %}
+                        <div class="ps-field-help">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <div class="ps-field-error">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+
+            <div class="ps-form-actions">
+                <button type="submit" class="ps-btn ps-btn-full">
+                    Обновить пароль
+                </button>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_change_done.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Пароль обновлён — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-section ps-section--center ps-section--narrow ps-animate-fade-up">
+    <h1 class="ps-section-title">Пароль успешно обновлён</h1>
+    <p class="ps-section-subtitle">
+        Ваш новый пароль сохранён. Используйте его для следующего входа.
+    </p>
+    <div class="ps-offline-actions">
+        <a href="{% url 'user_dashboard' %}" class="ps-btn">
+            В личный кабинет
+        </a>
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_reset.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Сброс пароля — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-auth">
+    <div class="ps-auth-card ps-card ps-card--elevated ps-animate-fade-up">
+        <h1 class="ps-auth-title">Сброс пароля</h1>
+        <p class="ps-auth-subtitle">
+            Укажите email, на который зарегистрирован аккаунт. Мы отправим ссылку
+            для задания нового пароля.
+        </p>
+
+        <form method="post" class="ps-form">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="ps-alert ps-alert--danger">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            {% for field in form.visible_fields %}
+                <div class="ps-form-row">
+                    <label class="ps-form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
+                    {{ field.as_widget(attrs={"class": "ps-input"}) }}
+                    {% for error in field.errors %}
+                        <div class="ps-field-error">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+
+            <div class="ps-form-actions">
+                <button type="submit" class="ps-btn ps-btn-full">
+                    Отправить ссылку
+                </button>
+            </div>
+        </form>
+
+        <div class="ps-auth-footer">
+            Вспомнили пароль?
+            <a href="{% url 'accounts:login' %}">Вернуться ко входу</a>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_reset_complete.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Пароль изменён — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-section ps-section--center ps-section--narrow ps-animate-fade-up">
+    <h1 class="ps-section-title">Пароль успешно изменён</h1>
+    <p class="ps-section-subtitle">
+        Теперь вы можете войти в свой аккаунт, используя новый пароль.
+    </p>
+    <div class="ps-offline-actions">
+        <a href="{% url 'accounts:login' %}" class="ps-btn">
+            Перейти ко входу
+        </a>
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_reset_confirm.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Новый пароль — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-auth">
+    <div class="ps-auth-card ps-card ps-card--elevated ps-animate-fade-up">
+        {% if validlink %}
+            <h1 class="ps-auth-title">Задайте новый пароль</h1>
+            <p class="ps-auth-subtitle">
+                Введите новый пароль дважды, чтобы исключить опечатки.
+            </p>
+
+            <form method="post" class="ps-form">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="ps-alert ps-alert--danger">
+                        {{ form.non_field_errors }}
+                    </div>
+                {% endif %}
+
+                {% for field in form.visible_fields %}
+                    <div class="ps-form-row">
+                        <label class="ps-form-label" for="{{ field.id_for_label }}">
+                            {{ field.label }}
+                        </label>
+                        {{ field.as_widget(attrs={"class": "ps-input"}) }}
+                        {% if field.help_text %}
+                            <div class="ps-field-help">{{ field.help_text }}</div>
+                        {% endif %}
+                        {% for error in field.errors %}
+                            <div class="ps-field-error">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+
+                <div class="ps-form-actions">
+                    <button type="submit" class="ps-btn ps-btn-full">
+                        Сохранить новый пароль
+                    </button>
+                </div>
+            </form>
+        {% else %}
+            <h1 class="ps-auth-title">Ссылка недействительна</h1>
+            <p class="ps-auth-subtitle">
+                Ссылка для сброса пароля устарела или уже была использована.
+                Попробуйте запросить сброс ещё раз.
+            </p>
+            <div class="ps-offline-actions">
+                <a href="{% url 'accounts:password_reset' %}" class="ps-btn">
+                    Запросить новую ссылку
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_reset_done.html
+################################################################################
+
+{% extends "base.html" %}
+
+{% block title %}Письмо отправлено — ParkShare RU{% endblock %}
+
+{% block content %}
+<section class="ps-section ps-section--center ps-section--narrow ps-animate-fade-up">
+    <h1 class="ps-section-title">Проверьте почту</h1>
+    <p class="ps-section-subtitle">
+        Если аккаунт с таким email существует, мы отправили на него письмо
+        с дальнейшими инструкциями.
+    </p>
+    <div class="ps-offline-actions">
+        <a href="{% url 'accounts:login' %}" class="ps-btn ps-btn-secondary">
+            Вернуться ко входу
+        </a>
+    </div>
+</section>
+{% endblock %}
+
+
+################################################################################
+# File: templates\accounts\password_reset_email.txt
+################################################################################
+
+Вы получили это письмо, потому что на сайте {{ site_name }} был запрошен сброс пароля
+для пользователя, использующего этот email.
+
+Чтобы задать новый пароль, перейдите по ссылке:
+
+{{ protocol }}://{{ domain }}{% url 'accounts:password_reset_confirm' uidb64=uid token=token %}
+
+Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.
+
+
+################################################################################
+# File: templates\accounts\password_reset_subject.txt
+################################################################################
+
+Сброс пароля на ParkShare RU
 
 
 ################################################################################
