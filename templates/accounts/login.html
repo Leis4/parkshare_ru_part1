@@ -25,7 +25,8 @@
                         {{ field.label }}
                     </label>
 
-                    {{ field.as_widget(attrs={"class": "ps-input"}) }}
+                    {{ field }}
+
 
                     {% if field.help_text %}
                         <div class="ps-field-help">{{ field.help_text }}</div>
