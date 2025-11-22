@@ -18,8 +18,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     - если для брони уже существует платёж в статусе SUCCEEDED — новый
       платёж создать нельзя;
     - если платёж существует, но ещё неуспешен (CREATED/PENDING/FAILED/CANCELLED),
-      он переиспользуется: переинициализируется через YooKassa и возвращается
-      с новым payment_url.
+      он переиспользуется: заново инициализируется через YooKassa и возвращается
+      с актуальным payment_url.
     """
 
     payer = serializers.ReadOnlyField(source="payer.username")
@@ -79,12 +79,14 @@ class PaymentSerializer(serializers.ModelSerializer):
         # Бронь должна ожидать оплаты
         if booking.is_paid or booking.status != Booking.Status.PENDING:
             raise serializers.ValidationError(
-                "Платёж можно создать только для брони в статусе 'Ожидает оплаты'."
+                "Платёж можно создать только для брони в статусе «Ожидает оплаты»."
             )
 
-        # Бронь не должна быть отменена/истечь и не в прошлом
         now = timezone.now()
-        if booking.status in (Booking.Status.CANCELLED, Booking.Status.EXPIRED) or booking.end_at <= now:
+        if booking.status in (
+            Booking.Status.CANCELLED,
+            Booking.Status.EXPIRED,
+        ) or booking.end_at <= now:
             raise serializers.ValidationError(
                 "Нельзя создать платёж для отменённой, истекшей или прошлой брони."
             )

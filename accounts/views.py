@@ -5,6 +5,7 @@ from typing import Any
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView as DjangoLoginView
+from django.contrib.auth.forms import PasswordResetForm
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
@@ -15,10 +16,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from core.permissions import IsSelfOrAdmin
-from .forms import ProfileForm, RegisterForm
+from .forms import LoginForm, ProfileForm, RegisterForm
 from .models import User
 from .serializers import (
+    ChangePasswordSerializer,
     LoginSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     UserProfileSerializer,
     UserSerializer,
@@ -68,10 +71,11 @@ class ProfileView(LoginRequiredMixin, UpdateView):
 
 class CustomLoginView(DjangoLoginView):
     """
-    Обёртка над стандартным LoginView с русским шаблоном.
+    Обёртка над стандартным LoginView с русским шаблоном и кастомной формой.
     """
 
     template_name = "accounts/login.html"
+    form_class = LoginForm
 
     def get_success_url(self) -> str:
         return reverse("user_dashboard")
@@ -90,27 +94,30 @@ class UserViewSet(viewsets.ModelViewSet):
     API для работы с пользователями.
 
     Маршруты:
-    - /api/accounts/users/             (GET)   — список (только админ)
-    - /api/accounts/users/{id}/        (GET)   — профиль (сам или админ)
-    - /api/accounts/users/me/          (GET)   — профиль текущего пользователя
-    - /api/accounts/users/me/          (PATCH) — обновление своего профиля
-    - /api/accounts/users/register/    (POST)  — регистрация
-    - /api/accounts/users/login/       (POST)  — логин (session-based)
-    - /api/accounts/users/logout/      (POST)  — логаут
+    - /api/accounts/users/                   (GET)   — список (только админ)
+    - /api/accounts/users/{id}/              (GET)   — профиль (сам или админ)
+    - /api/accounts/users/me/                (GET)   — профиль текущего пользователя
+    - /api/accounts/users/me/                (PATCH) — обновление своего профиля
+    - /api/accounts/users/register/          (POST)  — регистрация
+    - /api/accounts/users/login/             (POST)  — логин (session-based)
+    - /api/accounts/users/logout/            (POST)  — логаут
+    - /api/accounts/users/change-password/   (POST)  — смена пароля (API)
+    - /api/accounts/users/reset-password/    (POST)  — запрос сброса пароля по email
     """
 
     queryset = User.objects.all().order_by("-date_joined")
     serializer_class = UserSerializer
 
     def get_permissions(self) -> list[Any]:
-        if self.action in ("register", "login"):
+        if self.action in ("register", "login", "reset_password"):
             permission_classes = [permissions.AllowAny]
         elif self.action in ("list", "destroy"):
             permission_classes = [permissions.IsAdminUser]
-        elif self.action in ("me", "partial_update", "update", "retrieve", "logout"):
-            permission_classes = [permissions.IsAuthenticated, IsSelfOrAdmin]
-        else:
+        elif self.action in ("me", "change_password", "logout"):
             permission_classes = [permissions.IsAuthenticated]
+        else:
+            # retrieve/update/partial_update — только сам пользователь или админ
+            permission_classes = [permissions.IsAuthenticated, IsSelfOrAdmin]
         return [perm() for perm in permission_classes]
 
     def get_queryset(self):
@@ -175,4 +182,52 @@ class UserViewSet(viewsets.ModelViewSet):
         auth_logout(request)
         return Response(
             {"detail": "Вы вышли из системы."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=False, methods=["post"], url_path="change-password")
+    def change_password(self, request):
+        """
+        Смена пароля текущего пользователя (API).
+        """
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"detail": "Пароль успешно изменён."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="reset-password")
+    def reset_password(self, request):
+        """
+        Запрос на сброс пароля по email (API).
+
+        Использует стандартный PasswordResetForm и отправляет письмо
+        через настроенный EMAIL_BACKEND.
+        """
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        form = PasswordResetForm(data={"email": email})
+        if form.is_valid():
+            form.save(
+                request=request,
+                use_https=request.is_secure(),
+                email_template_name="accounts/password_reset_email.txt",
+                subject_template_name="accounts/password_reset_subject.txt",
+            )
+
+        # Независимо от результата говорим одно и то же, чтобы не раскрывать,
+        # существует ли пользователь с таким email.
+        return Response(
+            {
+                "detail": (
+                    "Если пользователь с таким email существует, на него отправлена "
+                    "инструкция по сбросу пароля."
+                )
+            },
+            status=status.HTTP_200_OK,
         )

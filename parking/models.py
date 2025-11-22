@@ -11,7 +11,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from core.models import TimeStampedModel  # предполагается из Часть 2
+from core.models import TimeStampedModel
 
 
 # PointField с fallback для SQLite: храним JSON {"lat": ..., "lng": ...}
@@ -73,6 +73,15 @@ class ParkingLot(TimeStampedModel):
         "Приватный",
         default=False,
         help_text="Если включено, объект виден только по прямым ссылкам/владельцу.",
+    )
+
+    stress_index = models.FloatField(
+        "Индекс загруженности (0..1)",
+        default=0.0,
+        help_text=(
+            "Средняя загруженность мест за последние 7 дней. "
+            "Обновляется фоновыми задачами AI."
+        ),
     )
 
     class Meta:
@@ -171,6 +180,15 @@ class ParkingSpot(TimeStampedModel):
         max_length=16,
         choices=SpotStatus.choices,
         default=SpotStatus.ACTIVE,
+    )
+
+    occupancy_7d = models.FloatField(
+        "Загруженность за 7 дней (0..1)",
+        default=0.0,
+        help_text=(
+            "Доля времени, когда место было занято за последние 7 дней. "
+            "Обновляется фоновыми задачами AI."
+        ),
     )
 
     class Meta:
@@ -367,7 +385,9 @@ class Booking(TimeStampedModel):
         commission = (
             base_price * Decimal(commission_percent) / Decimal("100")
         ).quantize(Decimal("0.01"))
-        return (base_price + commission).quantize(Decimal("0.01"))
+        total = (base_price + commission).quantize(Decimal("0.01"))
+        self.total_price = total
+        return total
 
     def mark_paid(self, payment_id: str | None = None) -> None:
         """

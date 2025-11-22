@@ -2,6 +2,7 @@
 
 import hashlib
 import math
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from django.conf import settings
@@ -36,15 +37,31 @@ def mask_plate_for_display(plate: str) -> str:
 
 def normalize_phone(phone: Optional[str]) -> str:
     """
-    Простейшая нормализация телефона: оставляем только цифры и ведущий '+'.
-    Используется только валидационно, сам телефон хранится зашифрованным.
+    Нормализация телефона:
+
+    - убираем все символы кроме цифр и '+';
+    - для РФ приводим к формату +7XXXXXXXXXX, если возможно;
+    - для остальных стран просто добавляем '+' перед цифрами.
     """
     if not phone:
         return ""
-    phone = phone.strip()
-    plus = "+" if phone.startswith("+") else ""
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    return plus + digits
+    raw = phone.strip()
+
+    # Оставляем плюс только в начале
+    plus = "+" if raw.startswith("+") else ""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ""
+
+    # РФ: 10 или 11 цифр, начинающихся с 8/7
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    elif len(digits) == 10:
+        digits = "7" + digits
+
+    if plus or digits.startswith("7"):
+        return "+" + digits
+    return "+" + digits  # простой фолбэк
 
 
 def haversine_distance_km(
@@ -90,3 +107,19 @@ def parse_float(value: Optional[str]) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def round_price(value: float | Decimal, step: float = 10.0) -> float:
+    """
+    Округляет цену к ближайшему шагу (step), по умолчанию — 10 ₽.
+
+    Используется в AI-модуле ценообразования.
+    """
+    if step <= 0:
+        return float(Decimal(str(value)).quantize(Decimal("0.01")))
+
+    v = Decimal(str(value))
+    step_dec = Decimal(str(step))
+    scaled = (v / step_dec).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    result = scaled * step_dec
+    return float(result)

@@ -9,8 +9,8 @@ from django.conf import settings
 from django.utils import timezone
 from sklearn.ensemble import RandomForestRegressor
 
-from backend.backend.core.utils import round_price
-from backend.backend.parking.models import ParkingSpot
+from core.utils import round_price
+from parking.models import ParkingSpot
 from .features import bookings_dataframe
 
 MODEL_PATH = Path(getattr(settings, "BASE_DIR", ".")) / "ai_models" / "pricing_model.pkl"
@@ -57,10 +57,10 @@ def recommend_price_for_spot(spot: ParkingSpot) -> Optional[Dict[str, Any]]:
     Возвращает диапазон рекомендованных цен для владельца места.
     Учитывает:
     - базовую цену;
-    - загрузку места за 7 дней;
+    - загрузку места за 7 дней (occupancy_7d);
     - (по возможности) предсказание ML‑модели.
     """
-    base_price = float(spot.price_hour or 0.0)
+    base_price = float(spot.hourly_price or 0.0)
     if base_price <= 0:
         return None
 
@@ -77,7 +77,7 @@ def recommend_price_for_spot(spot: ParkingSpot) -> Optional[Dict[str, Any]]:
         except Exception:
             predicted = None
 
-    occupancy = float(spot.occupancy_7d)
+    occupancy = float(getattr(spot, "occupancy_7d", 0.0) or 0.0)
     factor = 1.0
     reason_parts = []
 
