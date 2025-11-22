@@ -96,10 +96,13 @@ urlpatterns = [
         name="api-docs-redoc",
     ),
 
-    # AI API
+    # AI API (ParkMate + аналитика)
     path("api/ai/recommendations/", ai_api.RecommendationsAPIView.as_view(), name="ai_recommendations"),
     path("api/ai/stress-index/", ai_api.StressIndexAPIView.as_view(), name="ai_stress_index"),
     path("api/ai/departure-assistant/", ai_api.DepartureAssistantAPIView.as_view(), name="ai_departure_assistant"),
+    path("api/ai/parkmate/config/", ai_api.ParkMateConfigAPIView.as_view(), name="parkmate_config"),
+    path("api/ai/parkmate/price-forecast/", ai_api.ParkMatePriceForecastAPIView.as_view(), name="parkmate_price_forecast"),
+    path("api/ai/parkmate/availability/", ai_api.ParkMateAvailabilityForecastAPIView.as_view(), name="parkmate_availability"),
 
     # Payments webhooks
     path("payments/webhook/yookassa/", payments_api.YooKassaWebhookView.as_view(), name="yookassa_webhook"),

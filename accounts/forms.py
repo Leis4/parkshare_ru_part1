@@ -8,102 +8,117 @@ from django.utils.translation import gettext_lazy as _
 
 from core.utils import normalize_phone
 from .models import User
+from .utils import normalize_email, hash_email, hash_phone
 
 
 class LoginForm(AuthenticationForm):
     """
-    Форма входа: одно поле для логина / email / телефона + пароль.
+    HTML-форма логина (username + пароль).
+    Логика поиска по email/телефону заложена в API и LoginSerializer.
     """
 
     username = forms.CharField(
-        label=_("Логин / Email / Телефон"),
-        widget=forms.TextInput(attrs={"autofocus": True, "class": "ps-input"}),
+        label=_("Логин"),
+        widget=forms.TextInput(attrs={"class": "ps-input", "autocomplete": "username"}),
+    )
+    password = forms.CharField(
+        label=_("Пароль"),
+        widget=forms.PasswordInput(
+            attrs={"class": "ps-input", "autocomplete": "current-password"}
+        ),
     )
 
-    def clean(self):
-        """
-        Подменяем username на реальный логин пользователя, чтобы
-        AuthenticationForm могла вызвать authenticate() как обычно.
-        """
-        from .auth import find_user_by_identifier  # локальный импорт
-
-        identifier = self.cleaned_data.get("username")
-        password = self.cleaned_data.get("password")
-
-        if identifier and password:
-            user = find_user_by_identifier(identifier)
-            if user is not None:
-                self.cleaned_data["username"] = user.get_username()
-
-        return super().clean()
+    def confirm_login_allowed(self, user: User) -> None:
+        if not user.is_active:
+            raise forms.ValidationError(
+                _("Аккаунт деактивирован. Обратитесь в поддержку."),
+                code="inactive",
+            )
 
 
 class RegisterForm(UserCreationForm):
     """
-    Регистрация через HTML-форму.
-    Email и телефон — опциональные, сохраняются в зашифрованном виде.
+    HTML‑регистрация: username + (опционально) email и телефон.
+    Email/телефон хранятся в зашифрованных полях, но уникальность проверяем
+    по хэшам email_hash / phone_hash.
     """
 
     email = forms.EmailField(
         label=_("Email (опционально)"),
         required=False,
-        widget=forms.EmailInput(attrs={"class": "ps-input"}),
+        widget=forms.EmailInput(attrs={"class": "ps-input", "autocomplete": "email"}),
     )
     phone = forms.CharField(
         label=_("Телефон (опционально)"),
         required=False,
-        widget=forms.TextInput(attrs={"class": "ps-input"}),
+        widget=forms.TextInput(
+            attrs={
+                "class": "ps-input",
+                "inputmode": "tel",
+                "autocomplete": "tel",
+            }
+        ),
     )
 
     class Meta(UserCreationForm.Meta):
         model = User
         fields = ("username", "email", "phone")
         widgets = {
-            "username": forms.TextInput(attrs={"class": "ps-input"}),
+            "username": forms.TextInput(
+                attrs={"class": "ps-input", "autocomplete": "username"}
+            ),
         }
 
-    # В RegisterForm
     def clean_email(self) -> str:
         """
-        Просто нормализуем email, без запросов к БД.
+        Нормализуем email и проверяем уникальность по email_hash.
         """
-        email = (self.cleaned_data.get("email") or "").strip().lower()
+        raw_email = self.cleaned_data.get("email")
+        email = normalize_email(raw_email)
+        if not email:
+            return ""
+
+        email_hash = hash_email(email)
+        if email_hash and User.objects.filter(email_hash=email_hash).exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким email уже зарегистрирован.")
+            )
         return email
 
     def clean_phone(self) -> str:
         """
-        Только нормализуем номер, без проверки уникальности.
+        Нормализуем телефон и проверяем уникальность по phone_hash.
         """
-        phone = self.cleaned_data.get("phone") or ""
-        if not phone:
+        raw_phone = self.cleaned_data.get("phone") or ""
+        if not raw_phone:
             return ""
 
-        phone = normalize_phone(phone)
+        phone = normalize_phone(raw_phone)
         if not phone:
             raise forms.ValidationError(_("Некорректный формат телефона."))
+
+        phone_hash = hash_phone(phone)
+        if phone_hash and User.objects.filter(phone_hash=phone_hash).exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким телефоном уже зарегистрирован.")
+            )
         return phone
 
-    def save(self, commit: bool = True) -> Any:
-        user: User = super().save(commit=False)
-
-        email = self.cleaned_data.get("email", "").strip().lower()
-        phone = self.cleaned_data.get("phone", "")
-
-        user.email_plain = email or ""
-        user.phone_plain = normalize_phone(phone or "") if phone else ""
-
-        if commit:
-            user.save()
-        return user
-
     def save(self, commit: bool = True) -> User:
+        """
+        Сохраняем пользователя:
+        - username/пароль — стандартно;
+        - email/phone пишем в email_plain/phone_plain (зашифрованные поля),
+          хэши обновятся в модели User.save().
+        """
         user: User = super().save(commit=False)
+
         email = self.cleaned_data.get("email") or ""
         phone = self.cleaned_data.get("phone") or ""
-        if email:
-            user.email_plain = email
-        if phone:
-            user.phone_plain = phone
+
+        user.email_plain = email or ""
+        user.phone_plain = phone or ""
+
         if commit:
             user.save()
         return user
@@ -111,18 +126,24 @@ class RegisterForm(UserCreationForm):
 
 class ProfileForm(forms.ModelForm):
     """
-    Редактирование профиля (email/телефон).
+    Редактирование профиля (email / телефон) в HTML.
     """
 
     email = forms.EmailField(
         label=_("Email"),
         required=False,
-        widget=forms.EmailInput(attrs={"class": "ps-input"}),
+        widget=forms.EmailInput(attrs={"class": "ps-input", "autocomplete": "email"}),
     )
     phone = forms.CharField(
         label=_("Телефон"),
         required=False,
-        widget=forms.TextInput(attrs={"class": "ps-input"}),
+        widget=forms.TextInput(
+            attrs={
+                "class": "ps-input",
+                "inputmode": "tel",
+                "autocomplete": "tel",
+            }
+        ),
     )
 
     class Meta:
@@ -138,29 +159,57 @@ class ProfileForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
     def clean_email(self) -> str:
-        email = (self.cleaned_data.get("email") or "").strip().lower()
-        # Больше НИКАКИХ запросов к User.objects.filter(email_encrypted=...)
+        """
+        Нормализуем email и проверяем уникальность (кроме текущего пользователя).
+        """
+        raw_email = self.cleaned_data.get("email")
+        email = normalize_email(raw_email)
+        if not email:
+            return ""
+
+        email_hash = hash_email(email)
+        qs = User.objects.filter(email_hash=email_hash)
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if email_hash and qs.exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким email уже существует.")
+            )
         return email
 
     def clean_phone(self) -> str:
-        phone = self.cleaned_data.get("phone") or ""
-        if not phone:
+        """
+        Нормализуем телефон и проверяем уникальность (кроме текущего пользователя).
+        """
+        raw_phone = self.cleaned_data.get("phone") or ""
+        if not raw_phone:
             return ""
 
-        phone = normalize_phone(phone)
+        phone = normalize_phone(raw_phone)
         if not phone:
             raise forms.ValidationError(_("Некорректный формат телефона."))
-        # Больше НИКАКИХ запросов к User.objects.filter(phone_encrypted=...)
+
+        phone_hash = hash_phone(phone)
+        qs = User.objects.filter(phone_hash=phone_hash)
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if phone_hash and qs.exists():
+            raise forms.ValidationError(
+                _("Пользователь с таким телефоном уже существует.")
+            )
         return phone
 
-    def save(self, commit: bool = True) -> Any:
+    def save(self, commit: bool = True) -> User:
+        """
+        Обновляем зашифрованные поля email/phone, хэши обновятся в модели.
+        """
         user: User = super().save(commit=False)
 
-        email = (self.cleaned_data.get("email") or "").strip().lower()
+        email = self.cleaned_data.get("email") or ""
         phone = self.cleaned_data.get("phone") or ""
 
         user.email_plain = email or ""
-        user.phone_plain = normalize_phone(phone or "") if phone else ""
+        user.phone_plain = phone or ""
 
         if commit:
             user.save()

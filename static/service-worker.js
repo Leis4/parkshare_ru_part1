@@ -1,116 +1,145 @@
-/* eslint-disable no-restricted-globals */
+// static/service-worker.js
 
-const STATIC_CACHE = "parkshare-static-v3";
-const DYNAMIC_CACHE = "parkshare-dynamic-v3";
+const CACHE_VERSION = "v3";
+const STATIC_CACHE = `static-${CACHE_VERSION}`;
+const API_CACHE = `api-${CACHE_VERSION}`;
+const HTML_CACHE = `html-${CACHE_VERSION}`;
+
 const OFFLINE_URL = "/offline/";
 
+// Файлы, которые хотим иметь в офлайне сразу
 const STATIC_ASSETS = [
   "/",
-  "/offline/",
+  OFFLINE_URL,
   "/static/css/app.css",
+  "/static/css/base.css",
   "/static/js/app.js",
-  "/manifest.webmanifest"
-  // Иконки попадут в кэш по мере использования браузером
+  "/manifest.webmanifest",
 ];
 
-function isSameOrigin(request) {
-  return new URL(request.url).origin === self.location.origin;
+// Утилита: лог с префиксом
+function log(...args) {
+  // закомментируй в проде, если не нужен лог
+  // console.log("[SW]", ...args);
 }
 
-self.addEventListener("install", (event) => {
-  console.log("[SW] install");
-
+self.addEventListener("install", event => {
+  log("install");
   event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
-      .catch((err) => console.warn("[SW] pre-cache error", err))
+    caches.open(STATIC_CACHE).then(cache => {
+      return cache.addAll(STATIC_ASSETS).catch(() => null);
+    })
   );
+  self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
-  console.log("[SW] activate");
-
+self.addEventListener("activate", event => {
+  log("activate");
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys().then(keys =>
+      Promise.all(
         keys
-          .filter((key) => key !== STATIC_CACHE && key !== DYNAMIC_CACHE)
-          .map((key) => {
-            console.log("[SW] removing old cache", key);
-            return caches.delete(key);
-          })
-      );
-    }).then(() => self.clients.claim())
+          .filter(key => ![STATIC_CACHE, API_CACHE, HTML_CACHE].includes(key))
+          .map(key => caches.delete(key))
+      )
+    )
   );
+  self.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
+// Очень простой helper: GET-запрос?
+function isGetRequest(request) {
+  return request.method === "GET";
+}
+
+// Наш домен?
+function isSameOrigin(request) {
+  return self.location.origin === new URL(request.url).origin;
+}
+
+// API-запрос?
+function isApiRequest(request) {
+  const url = new URL(request.url);
+  return url.pathname.startsWith("/api/");
+}
+
+// HTML-страница?
+function isHtmlRequest(request) {
+  return request.headers.get("accept")?.includes("text/html");
+}
+
+self.addEventListener("fetch", event => {
   const { request } = event;
 
-  // Только GET
-  if (request.method !== "GET") return;
-
-  const url = new URL(request.url);
-
-  // Не трогаем сторонние домены
-  if (!isSameOrigin(request)) return;
-
-  // HTML: network-first с оффлайн-фоллбеком
-  if (request.mode === "navigate" || request.headers.get("accept")?.includes("text/html")) {
-    event.respondWith(networkFirst(request));
+  if (!isGetRequest(request)) {
     return;
   }
 
-  // Статика: cache-first
-  if (url.pathname.startsWith("/static/")) {
-    event.respondWith(cacheFirst(request));
+  // 1) API: strategy "network-first с fallback в кеш"
+  if (isApiRequest(request)) {
+    event.respondWith(networkFirst(request, API_CACHE));
     return;
   }
 
-  // API: network-first с кэшом на всякий случай
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(networkFirst(request));
+  // 2) HTML-страницы: тоже network-first + офлайн-страница
+  if (isSameOrigin(request) && isHtmlRequest(request)) {
+    event.respondWith(
+      networkFirst(request, HTML_CACHE, {
+        fallbackUrl: OFFLINE_URL,
+      })
+    );
     return;
   }
 
-  // Всё остальное — мягкий cache-first
-  event.respondWith(cacheFirst(request));
+  // 3) Всё остальное (CSS/JS/картинки) — cache-first
+  event.respondWith(cacheFirst(request, STATIC_CACHE));
 });
 
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
+// --------- стратегии кеширования ---------
+
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
 
   try {
     const response = await fetch(request);
-    const cache = await caches.open(DYNAMIC_CACHE);
-    cache.put(request, response.clone());
+    if (response && response.status === 200) {
+      cache.put(request, response.clone());
+    }
     return response;
   } catch (err) {
-    // В случае ошибки просто пробуем offline.html для HTML-запросов
-    if (request.headers.get("accept")?.includes("text/html")) {
-      const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+    // Если совсем всё плохо — пробуем офлайн-страницу
+    if (isHtmlRequest(request)) {
+      const fallback = await caches.match(OFFLINE_URL);
+      if (fallback) return fallback;
     }
     throw err;
   }
 }
 
-async function networkFirst(request) {
+async function networkFirst(request, cacheName, options = {}) {
+  const cache = await caches.open(cacheName);
+
   try {
     const response = await fetch(request);
-    const cache = await caches.open(DYNAMIC_CACHE);
-    cache.put(request, response.clone());
+    if (response && response.status === 200) {
+      cache.put(request, response.clone());
+    }
     return response;
   } catch (err) {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-
-    if (request.headers.get("accept")?.includes("text/html")) {
-      const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
     }
+
+    if (options.fallbackUrl) {
+      const fallback = await caches.match(options.fallbackUrl);
+      if (fallback) return fallback;
+    }
+
     throw err;
   }
 }

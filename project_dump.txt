@@ -1,13 +1,14 @@
 ################################################################################
 # PROJECT DUMP
 # Root: C:\Users\Sultan\Downloads\parkshare_ru_part1
-# Generated at: 2025-11-22 17:05:47
+# Generated at: 2025-11-22 19:15:35
 ################################################################################
 PROJECT TREE:
 --------------------------------------------------------------------------------
 parkshare_ru_part1/
     .env
     .env.example
+    .env.prod
     .gitattributes
     .gitignore
     Dockerfile
@@ -146,32 +147,18 @@ FILES CONTENT:
 # File: .env
 ################################################################################
 
-# -----------------------------
-# DJANGO SETTINGS
-# -----------------------------
 DEBUG=1
 SECRET_KEY=django-insecure-test-secret-key-for-dev-only
 ALLOWED_HOSTS=127.0.0.1,localhost
-
-# -----------------------------
-# DATABASE (SQLite)
-# -----------------------------
 DATABASE_NAME=db.sqlite3
 
-# -----------------------------
-# YOOKASSA PAYMENTS
-# (можно оставить пустыми — тогда просто не будет работать платежка)
-# -----------------------------
 YOOKASSA_SHOP_ID=
 YOOKASSA_SECRET_KEY=
 
-# -----------------------------
-# EMAIL SETTINGS (можно не трогать)
-# -----------------------------
 EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
-
-
 MAPBOX_TOKEN=your_actual_token_here
+
+
 
 ################################################################################
 # File: .env.example
@@ -217,6 +204,50 @@ SERVICE_COMMISSION_PERCENT=10
 SECURE_SSL_REDIRECT=False
 SESSION_COOKIE_SECURE=False
 CSRF_COOKIE_SECURE=False
+
+
+################################################################################
+# File: .env.prod
+################################################################################
+
+# -----------------------------
+# DJANGO SETTINGS (PROD)
+# -----------------------------
+DEBUG=0
+SECRET_KEY=django-insecure-поставь_сюда_очень_длинную_строку_символов
+ALLOWED_HOSTS=your-domain.ru,your-domain.com,127.0.0.1
+
+DJANGO_SETTINGS_MODULE=backend.settings.production
+
+# -----------------------------
+# DATABASE (PostgreSQL / PostGIS)
+# -----------------------------
+DATABASE_NAME=parkshare
+DATABASE_USER=parkshare
+DATABASE_PASSWORD=сильный_пароль_к_бд
+DATABASE_HOST=db
+DATABASE_PORT=5432
+
+# -----------------------------
+# YOOKASSA PAYMENTS (боевые реквизиты)
+# -----------------------------
+YOOKASSA_SHOP_ID=твой_shop_id
+YOOKASSA_SECRET_KEY=твой_secret_key
+
+# -----------------------------
+# EMAIL SETTINGS
+# -----------------------------
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.yandex.ru
+EMAIL_PORT=465
+EMAIL_USE_SSL=1
+EMAIL_HOST_USER=no-reply@your-domain.ru
+EMAIL_HOST_PASSWORD=пароль_от_почты
+
+# -----------------------------
+# MAP / OTHER
+# -----------------------------
+MAPBOX_TOKEN=your_actual_token_here
 
 
 ################################################################################
@@ -554,6 +585,280 @@ sh -c "python backend/manage.py migrate &&
 
 ################################################################################
 # File: project_dump.txt
+################################################################################
+
+################################################################################
+# PROJECT DUMP
+# Root: C:\Users\Sultan\Downloads\parkshare_ru_part1
+# Generated at: 2025-11-22 19:15:35
+################################################################################
+PROJECT TREE:
+--------------------------------------------------------------------------------
+parkshare_ru_part1/
+    .env
+    .env.example
+    .env.prod
+    .gitattributes
+    .gitignore
+    Dockerfile
+    README.md
+    docker-compose.yml
+    dump_project.py
+    entrypoint.sh
+    project_dump.txt
+    requirements.txt
+    accounts/
+        __init__.py
+        admin.py
+        apps.py
+        auth.py
+        forms.py
+        models.py
+        serializers.py
+        urls.py
+        views.py
+        migrations/
+            0001_initial.py
+            __init__.py
+    ai/
+        __init__.py
+        admin.py
+        apps.py
+        features.py
+        models.py
+        pricing.py
+        serializers.py
+        tasks.py
+        views.py
+    backend/
+        manage.py
+        backend/
+            __init__.py
+            config/
+                __init__.py
+                asgi.py
+                celery.py
+                urls.py
+                wsgi.py
+            settings/
+                __init__.py
+                base.py
+                local.py
+                production.py
+        tests/
+            __init__.py
+            test_auth_api.py
+            test_booking_model.py
+    core/
+        __init__.py
+        admin.py
+        apps.py
+        models.py
+        pagination.py
+        permissions.py
+        utils.py
+    nginx/
+        nginx.conf
+    parking/
+        __init__.py
+        admin.py
+        apps.py
+        models.py
+        serializers.py
+        tasks.py
+        urls.py
+        views.py
+        migrations/
+            0001_initial.py
+            0002_parkinglot_stress_index_parkingspot_occupancy_7d.py
+            __init__.py
+    payments/
+        __init__.py
+        admin.py
+        apps.py
+        models.py
+        providers.py
+        serializers.py
+        tasks.py
+        views.py
+        migrations/
+            0001_initial.py
+            __init__.py
+        providers/
+            __init__.py
+            base.py
+            yookassa.py
+    static/
+        manifest.webmanifest
+        service-worker.js
+        css/
+            app.css
+        icons/
+        js/
+            app.js
+    templates/
+        base.html
+        offline.html
+        accounts/
+            login.html
+            password_change.html
+            password_change_done.html
+            password_reset.html
+            password_reset_complete.html
+            password_reset_confirm.html
+            password_reset_done.html
+            password_reset_email.txt
+            password_reset_subject.txt
+            profile.html
+            register.html
+        parking/
+            landing.html
+            owner_dashboard.html
+            user_dashboard.html
+    vehicles/
+        __init__.py
+        admin.py
+        apps.py
+        models.py
+        serializers.py
+        urls.py
+        views.py
+        migrations/
+            0001_initial.py
+            __init__.py
+
+
+================================================================================
+FILES CONTENT:
+================================================================================
+
+################################################################################
+# File: .env
+################################################################################
+
+DEBUG=1
+SECRET_KEY=django-insecure-test-secret-key-for-dev-only
+ALLOWED_HOSTS=127.0.0.1,localhost
+DATABASE_NAME=db.sqlite3
+
+YOOKASSA_SHOP_ID=
+YOOKASSA_SECRET_KEY=
+
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+MAPBOX_TOKEN=your_actual_token_here
+
+
+
+################################################################################
+# File: .env.example
+################################################################################
+
+# Базовые настройки Django
+DEBUG=True
+SECRET_KEY=change_me_to_random_long_secret_key
+ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+
+# База данных
+# Для продакшена: postgres://user:password@db:5432/parkshare
+# Django-environ автоматически распарсит URL.
+DATABASE_URL=sqlite:///db.sqlite3
+
+# Redis (брокер/кэш)
+REDIS_URL=redis://redis:6379/0
+
+# Таймзона и язык
+TIME_ZONE=Europe/Moscow
+LANGUAGE_CODE=ru-ru
+
+# Соль для хэширования цифр номеров
+VEHICLE_PLATE_SALT=change_me_vehicle_plate_salt
+
+# Настройки CORS (если нужен доступ с другого домена, например, моб. WebView)
+CORS_ALLOWED_ORIGINS=http://localhost:8000
+
+# Настройки Celery
+CELERY_BROKER_URL=${REDIS_URL}
+CELERY_RESULT_BACKEND=${REDIS_URL}
+
+# Настройки YooKassa (пример)
+YOOKASSA_SHOP_ID=your_shop_id_here
+YOOKASSA_SECRET_KEY=your_secret_key_here
+YOOKASSA_RETURN_URL=https://example.com/payments/return/
+YOOKASSA_WEBHOOK_SECRET=change_me_webhook_secret
+
+# Комиссия сервиса (процент, будет использована в бизнес-логике)
+SERVICE_COMMISSION_PERCENT=10
+
+# Безопасность для продакшена
+SECURE_SSL_REDIRECT=False
+SESSION_COOKIE_SECURE=False
+CSRF_COOKIE_SECURE=False
+
+
+################################################################################
+# File: .env.prod
+################################################################################
+
+# -----------------------------
+# DJANGO SETTINGS (PROD)
+# -----------------------------
+DEBUG=0
+SECRET_KEY=django-insecure-поставь_сюда_очень_длинную_строку_символов
+ALLOWED_HOSTS=your-domain.ru,your-domain.com,127.0.0.1
+
+DJANGO_SETTINGS_MODULE=backend.settings.production
+
+# -----------------------------
+# DATABASE (PostgreSQL / PostGIS)
+# -----------------------------
+DATABASE_NAME=parkshare
+DATABASE_USER=parkshare
+DATABASE_PASSWORD=сильный_пароль_к_бд
+DATABASE_HOST=db
+DATABASE_PORT=5432
+
+# -----------------------------
+# YOOKASSA PAYMENTS (боевые реквизиты)
+# -----------------------------
+YOOKASSA_SHOP_ID=твой_shop_id
+YOOKASSA_SECRET_KEY=твой_secret_key
+
+# -----------------------------
+# EMAIL SETTINGS
+# -----------------------------
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.yandex.ru
+EMAIL_PORT=465
+EMAIL_USE_SSL=1
+EMAIL_HOST_USER=no-reply@your-domain.ru
+EMAIL_HOST_PASSWORD=пароль_от_почты
+
+# -----------------------------
+# MAP / OTHER
+# -----------------------------
+MAPBOX_TOKEN=your_actual_token_here
+
+
+################################################################################
+# File: .gitattributes
+################################################################################
+
+# Auto detect text files and perform LF normalization
+* text=auto
+
+
+################################################################################
+# File: .gitignore
+################################################################################
+
+.env
+node_modules/
+.DS_Store
+*.log
+dist/
+
+################################################################################
+# File: Dockerfile
 ################################################################################
 
 
@@ -1849,20 +2154,89 @@ def update_models() -> None:
 # File: ai\views.py
 ################################################################################
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
+# backend/ai/views.py
+
+from __future__ import annotations
+
+from typing import Any
+
+from django.utils import timezone
 from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from parking.models import ParkingLot, ParkingSpot
+from ai.pricing import recommend_price_for_spot
 
 
 class RecommendationsAPIView(APIView):
     """
-    Возвращает заглушку AI-рекомендаций.
+    Реальные AI-рекомендации по парковкам.
+
+    Пример:
+    GET /api/ai/recommendations/?city=Москва&limit=10
     """
-    def get(self, request, *args, **kwargs):
+
+    def get(self, request, *args: Any, **kwargs: Any) -> Response:
+        city = request.query_params.get("city")
+        limit = int(request.query_params.get("limit", 10))
+
+        qs = ParkingSpot.objects.filter(
+            status=ParkingSpot.SpotStatus.ACTIVE,
+            lot__is_active=True,
+            lot__is_approved=True,
+        ).select_related("lot")
+
+        if city:
+            qs = qs.filter(lot__city__iexact=city)
+
+        # Сначала берём самые "менее загруженные" и дешёвые места
+        qs = qs.order_by("lot__stress_index", "hourly_price")[: limit * 2]
+
+        recommendations: list[dict[str, Any]] = []
+        now = timezone.now()
+
+        for spot in qs[:limit]:
+            try:
+                pricing = recommend_price_for_spot(spot)
+            except Exception:
+                pricing = None
+
+            rec: dict[str, Any] = {
+                "spot_id": str(spot.id),
+                "lot_id": str(spot.lot_id),
+                "lot_name": spot.lot.name,
+                "city": spot.lot.city,
+                "address": spot.lot.address,
+                "vehicle_type": spot.get_vehicle_type_display(),
+                "hourly_price": float(spot.hourly_price or 0),
+                "occupancy_7d": float(spot.occupancy_7d or 0.0),
+                "stress_index": float(spot.lot.stress_index or 0.0),
+                "is_covered": spot.is_covered,
+                "has_ev_charging": spot.has_ev_charging,
+                "is_24_7": spot.is_24_7,
+                "now": now,
+            }
+
+            if pricing:
+                rec.update(
+                    {
+                        "ai_recommended_hourly_price": pricing["recommended_price"],
+                        "ai_base_price": pricing["base_price"],
+                        "ai_min_price": pricing["min_price"],
+                        "ai_max_price": pricing["max_price"],
+                        "ai_reason": pricing["reason"],
+                        "ai_discount_percent": pricing["discount_percent"],
+                        "ai_is_discount": pricing["is_discount"],
+                    }
+                )
+
+            recommendations.append(rec)
+
         return Response(
             {
-                "recommendations": [],
-                "message": "AI-рекомендации пока не реализованы",
+                "count": len(recommendations),
+                "results": recommendations,
             },
             status=status.HTTP_200_OK,
         )
@@ -1870,13 +2244,51 @@ class RecommendationsAPIView(APIView):
 
 class StressIndexAPIView(APIView):
     """
-    Заглушка индекса загруженности парковок.
+    Реальный индекс загруженности по городам / парковкам.
+
+    Пример:
+    GET /api/ai/stress-index/          # общий срез
+    GET /api/ai/stress-index/?city=СПб
     """
-    def get(self, request, *args, **kwargs):
+
+    def get(self, request, *args: Any, **kwargs: Any) -> Response:
+        city = request.query_params.get("city")
+
+        lots_qs = ParkingLot.objects.filter(is_active=True, is_approved=True)
+        if city:
+            lots_qs = lots_qs.filter(city__iexact=city)
+
+        lots = list(
+            lots_qs.values(
+                "id",
+                "name",
+                "city",
+                "address",
+                "stress_index",
+            )
+        )
+
+        if not lots:
+            return Response(
+                {
+                    "stress_index": 0.0,
+                    "lots": [],
+                    "details": "Нет активных парковок для выбранного фильтра",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        values = [float(l["stress_index"] or 0.0) for l in lots]
+        avg = sum(values) / len(values)
+        max_val = max(values)
+        min_val = min(values)
+
         return Response(
             {
-                "stress_index": 0,
-                "details": "AI-индекс загруженности пока не реализован",
+                "stress_index": round(avg, 3),
+                "min": round(min_val, 3),
+                "max": round(max_val, 3),
+                "lots": lots,
             },
             status=status.HTTP_200_OK,
         )
@@ -1884,19 +2296,54 @@ class StressIndexAPIView(APIView):
 
 class DepartureAssistantAPIView(APIView):
     """
-    Заглушка помощника по времени выезда.
-    Например, в будущем тут можно будет учитывать пробки, время до парковки и т.п.
+    Простейший помощник по времени выезда (пока без внешних API).
+
+    Принимает:
+    POST /api/ai/departure-assistant/
+    {
+      "desired_arrival_iso": "2025-11-22T19:00:00+03:00",
+      "parking_buffer_minutes": 10,
+      "traffic_buffer_minutes": 20
+    }
     """
 
-    def post(self, request, *args, **kwargs):
-        # На будущее: можно принимать в body:
-        # - пункт назначения
-        # - желаемое время прибытия
-        # - примерное время на парковку/поиск места
+    def post(self, request, *args: Any, **kwargs: Any) -> Response:
+        from datetime import timedelta
+        from django.utils.dateparse import parse_datetime
+
+        desired_arrival_iso = request.data.get("desired_arrival_iso")
+        parking_buffer = int(request.data.get("parking_buffer_minutes", 10))
+        traffic_buffer = int(request.data.get("traffic_buffer_minutes", 20))
+
+        if not desired_arrival_iso:
+            return Response(
+                {
+                    "detail": "Нужен параметр desired_arrival_iso в ISO-формате",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        desired_arrival = parse_datetime(desired_arrival_iso)
+        if desired_arrival is None:
+            return Response(
+                {
+                    "detail": "Не удалось распарсить desired_arrival_iso",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        total_buffer = timedelta(
+            minutes=parking_buffer + traffic_buffer,
+        )
+        suggested_departure = desired_arrival - total_buffer
+
         return Response(
             {
-                "suggested_departure_time": None,
-                "message": "AI-помощник по выезду пока не реализован",
+                "suggested_departure_time": suggested_departure,
+                "desired_arrival_time": desired_arrival,
+                "parking_buffer_minutes": parking_buffer,
+                "traffic_buffer_minutes": traffic_buffer,
+                "message": "Пока без пробок/погоды, но уже считает буферы времени.",
             },
             status=status.HTTP_200_OK,
         )
@@ -1907,19 +2354,26 @@ class DepartureAssistantAPIView(APIView):
 ################################################################################
 
 #!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
 import os
 import sys
 
 
 def main() -> None:
     """Run administrative tasks."""
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
+    # Если DJANGO_SETTINGS_MODULE не задан, считаем, что это локальная разработка
+    if "DJANGO_SETTINGS_MODULE" not in os.environ:
+        os.environ["DJANGO_SETTINGS_MODULE"] = "backend.settings.local"
+        # Если бесит предупреждение — можно удалить print
+        print("⚠ DJANGO_SETTINGS_MODULE не задан, использую backend.settings.local (dev)")
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
         raise ImportError(
-            "Не удалось импортировать Django. Убедитесь, что он установлен и "
-            "доступен в вашем виртуальном окружении."
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
         ) from exc
     execute_from_command_line(sys.argv)
 
@@ -1952,32 +2406,51 @@ import os
 
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
+settings_module = os.environ.get("DJANGO_SETTINGS_MODULE")
+if not settings_module:
+    raise RuntimeError(
+        "DJANGO_SETTINGS_MODULE не задан. "
+        "Укажи backend.settings.local (dev) или backend.settings.production (prod)."
+    )
 
 application = get_asgi_application()
+
 
 
 ################################################################################
 # File: backend\backend\config\celery.py
 ################################################################################
 
+# backend/backend/config/celery.py
+
+from __future__ import annotations
+
 import os
 
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
 
+# 1) Проверяем, что DJANGO_SETTINGS_MODULE задан извне
+settings_module = os.environ.get("DJANGO_SETTINGS_MODULE")
+if not settings_module:
+    raise RuntimeError(
+        "DJANGO_SETTINGS_MODULE не задан. "
+        "Укажи backend.settings.local (dev) или backend.settings.production (prod) "
+        "в переменных окружения (например, в .env или unit-файле systemd)."
+    )
+
+# 2) Создаём Celery-приложение
 app = Celery("backend")
 
-# Читаем конфиг из Django settings, все переменные CELERY_*
+# 3) Читаем конфиг из Django settings, все переменные с префиксом CELERY_
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
-# Авто‑обнаружение tasks.py во всех приложениях
+# 4) Авто-обнаружение tasks.py во всех django-приложениях
 app.autodiscover_tasks()
 
 
 @app.task(bind=True)
-def debug_task(self):
+def debug_task(self) -> None:
     print(f"Debug task: Request: {self.request!r}")
 
 
@@ -2108,9 +2581,15 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
+settings_module = os.environ.get("DJANGO_SETTINGS_MODULE")
+if not settings_module:
+    raise RuntimeError(
+        "DJANGO_SETTINGS_MODULE не задан. "
+        "Укажи backend.settings.local (dev) или backend.settings.production (prod)."
+    )
 
 application = get_wsgi_application()
+
 
 
 ################################################################################
@@ -2165,7 +2644,9 @@ if env_file.exists():
     environ.Env.read_env(str(env_file))
 
 DEBUG: bool = env.bool("DEBUG", default=False)
-SECRET_KEY: str = env("SECRET_KEY", default="unsafe-secret-key-change-me")
+# ОБЯЗАТЕЛЬНО: ключ только из переменной окружения / .env
+SECRET_KEY: str = env("SECRET_KEY")
+
 
 ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
@@ -5392,119 +5873,148 @@ def create_yookassa_payment(booking) -> Tuple[str, str, dict[str, Any]]:
 # File: static\service-worker.js
 ################################################################################
 
-/* eslint-disable no-restricted-globals */
+// static/service-worker.js
 
-const STATIC_CACHE = "parkshare-static-v3";
-const DYNAMIC_CACHE = "parkshare-dynamic-v3";
+const CACHE_VERSION = "v3";
+const STATIC_CACHE = `static-${CACHE_VERSION}`;
+const API_CACHE = `api-${CACHE_VERSION}`;
+const HTML_CACHE = `html-${CACHE_VERSION}`;
+
 const OFFLINE_URL = "/offline/";
 
+// Файлы, которые хотим иметь в офлайне сразу
 const STATIC_ASSETS = [
   "/",
-  "/offline/",
+  OFFLINE_URL,
   "/static/css/app.css",
+  "/static/css/base.css",
   "/static/js/app.js",
-  "/manifest.webmanifest"
-  // Иконки попадут в кэш по мере использования браузером
+  "/manifest.webmanifest",
 ];
 
-function isSameOrigin(request) {
-  return new URL(request.url).origin === self.location.origin;
+// Утилита: лог с префиксом
+function log(...args) {
+  // закомментируй в проде, если не нужен лог
+  // console.log("[SW]", ...args);
 }
 
-self.addEventListener("install", (event) => {
-  console.log("[SW] install");
-
+self.addEventListener("install", event => {
+  log("install");
   event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
-      .catch((err) => console.warn("[SW] pre-cache error", err))
+    caches.open(STATIC_CACHE).then(cache => {
+      return cache.addAll(STATIC_ASSETS).catch(() => null);
+    })
   );
+  self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
-  console.log("[SW] activate");
-
+self.addEventListener("activate", event => {
+  log("activate");
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys().then(keys =>
+      Promise.all(
         keys
-          .filter((key) => key !== STATIC_CACHE && key !== DYNAMIC_CACHE)
-          .map((key) => {
-            console.log("[SW] removing old cache", key);
-            return caches.delete(key);
-          })
-      );
-    }).then(() => self.clients.claim())
+          .filter(key => ![STATIC_CACHE, API_CACHE, HTML_CACHE].includes(key))
+          .map(key => caches.delete(key))
+      )
+    )
   );
+  self.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
+// Очень простой helper: GET-запрос?
+function isGetRequest(request) {
+  return request.method === "GET";
+}
+
+// Наш домен?
+function isSameOrigin(request) {
+  return self.location.origin === new URL(request.url).origin;
+}
+
+// API-запрос?
+function isApiRequest(request) {
+  const url = new URL(request.url);
+  return url.pathname.startsWith("/api/");
+}
+
+// HTML-страница?
+function isHtmlRequest(request) {
+  return request.headers.get("accept")?.includes("text/html");
+}
+
+self.addEventListener("fetch", event => {
   const { request } = event;
 
-  // Только GET
-  if (request.method !== "GET") return;
-
-  const url = new URL(request.url);
-
-  // Не трогаем сторонние домены
-  if (!isSameOrigin(request)) return;
-
-  // HTML: network-first с оффлайн-фоллбеком
-  if (request.mode === "navigate" || request.headers.get("accept")?.includes("text/html")) {
-    event.respondWith(networkFirst(request));
+  if (!isGetRequest(request)) {
     return;
   }
 
-  // Статика: cache-first
-  if (url.pathname.startsWith("/static/")) {
-    event.respondWith(cacheFirst(request));
+  // 1) API: strategy "network-first с fallback в кеш"
+  if (isApiRequest(request)) {
+    event.respondWith(networkFirst(request, API_CACHE));
     return;
   }
 
-  // API: network-first с кэшом на всякий случай
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(networkFirst(request));
+  // 2) HTML-страницы: тоже network-first + офлайн-страница
+  if (isSameOrigin(request) && isHtmlRequest(request)) {
+    event.respondWith(
+      networkFirst(request, HTML_CACHE, {
+        fallbackUrl: OFFLINE_URL,
+      })
+    );
     return;
   }
 
-  // Всё остальное — мягкий cache-first
-  event.respondWith(cacheFirst(request));
+  // 3) Всё остальное (CSS/JS/картинки) — cache-first
+  event.respondWith(cacheFirst(request, STATIC_CACHE));
 });
 
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
+// --------- стратегии кеширования ---------
+
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
 
   try {
     const response = await fetch(request);
-    const cache = await caches.open(DYNAMIC_CACHE);
-    cache.put(request, response.clone());
+    if (response && response.status === 200) {
+      cache.put(request, response.clone());
+    }
     return response;
   } catch (err) {
-    // В случае ошибки просто пробуем offline.html для HTML-запросов
-    if (request.headers.get("accept")?.includes("text/html")) {
-      const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+    // Если совсем всё плохо — пробуем офлайн-страницу
+    if (isHtmlRequest(request)) {
+      const fallback = await caches.match(OFFLINE_URL);
+      if (fallback) return fallback;
     }
     throw err;
   }
 }
 
-async function networkFirst(request) {
+async function networkFirst(request, cacheName, options = {}) {
+  const cache = await caches.open(cacheName);
+
   try {
     const response = await fetch(request);
-    const cache = await caches.open(DYNAMIC_CACHE);
-    cache.put(request, response.clone());
+    if (response && response.status === 200) {
+      cache.put(request, response.clone());
+    }
     return response;
   } catch (err) {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-
-    if (request.headers.get("accept")?.includes("text/html")) {
-      const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
     }
+
+    if (options.fallbackUrl) {
+      const fallback = await caches.match(options.fallbackUrl);
+      if (fallback) return fallback;
+    }
+
     throw err;
   }
 }

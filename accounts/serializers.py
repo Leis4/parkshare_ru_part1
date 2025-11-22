@@ -8,6 +8,7 @@ from rest_framework import serializers
 from core.utils import normalize_phone
 from .auth import find_user_by_identifier
 from .models import User
+from .utils import normalize_email, hash_email, hash_phone
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -45,10 +46,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
     """
 
     email = serializers.CharField(
-        source="email_plain", allow_blank=True, required=False
+        source="email_plain",
+        allow_blank=True,
+        required=False,
     )
     phone = serializers.CharField(
-        source="phone_plain", allow_blank=True, required=False
+        source="phone_plain",
+        allow_blank=True,
+        required=False,
     )
 
     class Meta:
@@ -56,28 +61,42 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ("id", "username", "role", "email", "phone")
 
     def validate_phone(self, value: str) -> str:
-        value = normalize_phone(value)
-        user = self.instance
+        """
+        Валидируем и нормализуем телефон, проверяем уникальность через phone_hash.
+        """
+        value = value or ""
         if not value:
             return ""
-        qs = User.objects.filter(phone_encrypted=value)
+
+        normalized = normalize_phone(value)
+        if not normalized:
+            raise serializers.ValidationError(_("Некорректный формат телефона."))
+
+        phone_hash = hash_phone(normalized)
+        user = self.instance
+        qs = User.objects.filter(phone_hash=phone_hash)
         if user is not None:
             qs = qs.exclude(pk=user.pk)
-        if qs.exists():
+        if phone_hash and qs.exists():
             raise serializers.ValidationError(
                 _("Пользователь с таким телефоном уже существует.")
             )
-        return value
+        return normalized
 
     def validate_email(self, value: str) -> str:
-        value = (value or "").strip().lower()
+        """
+        Валидируем и нормализуем email, проверяем уникальность через email_hash.
+        """
+        value = normalize_email(value)
         if not value:
             return ""
+
+        email_hash = hash_email(value)
         user = self.instance
-        qs = User.objects.filter(email_encrypted=value)
+        qs = User.objects.filter(email_hash=email_hash)
         if user is not None:
             qs = qs.exclude(pk=user.pk)
-        if qs.exists():
+        if email_hash and qs.exists():
             raise serializers.ValidationError(
                 _("Пользователь с таким email уже существует.")
             )
@@ -102,24 +121,29 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value: str) -> str:
-        value = (value or "").strip().lower()
-        if not value:
+        email = normalize_email(value)
+        if not email:
             return ""
-        if User.objects.filter(email_encrypted=value).exists():
+        email_hash = hash_email(email)
+        if email_hash and User.objects.filter(email_hash=email_hash).exists():
             raise serializers.ValidationError(
                 _("Пользователь с таким email уже зарегистрирован.")
             )
-        return value
+        return email
 
     def validate_phone(self, value: str) -> str:
-        value = normalize_phone(value)
+        value = value or ""
         if not value:
             return ""
-        if User.objects.filter(phone_encrypted=value).exists():
+        normalized = normalize_phone(value)
+        if not normalized:
+            raise serializers.ValidationError(_("Некорректный формат телефона."))
+        phone_hash = hash_phone(normalized)
+        if phone_hash and User.objects.filter(phone_hash=phone_hash).exists():
             raise serializers.ValidationError(
                 _("Пользователь с таким телефоном уже зарегистрирован.")
             )
-        return value
+        return normalized
 
     def validate_password(self, value: str) -> str:
         validate_password(value)
@@ -128,12 +152,15 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated_data: dict) -> User:
         email = validated_data.pop("email", "")
         phone = validated_data.pop("phone", "")
+
         user = User(username=validated_data["username"])
         user.set_password(validated_data["password"])
+
         if email:
             user.email_plain = email
         if phone:
             user.phone_plain = phone
+
         user.save()
         return user
 
@@ -155,22 +182,35 @@ class LoginSerializer(serializers.Serializer):
 
         if not identifier or not password:
             raise serializers.ValidationError(
-                _("Необходимо указать логин и пароль."), code="authorization"
-            )
-
-        user = find_user_by_identifier(identifier)
-        if not user or not user.check_password(password):
-            raise serializers.ValidationError(
-                _("Неверный логин (имя, email или телефон) или пароль."),
+                _("Необходимо указать логин и пароль."),
                 code="authorization",
             )
 
-        if not user.is_active:
+        user = find_user_by_identifier(identifier)
+        if user is None:
             raise serializers.ValidationError(
-                _("Пользователь деактивирован."), code="authorization"
+                _("Неверный логин/email/телефон или пароль."),
+                code="authorization",
             )
 
-        attrs["user"] = user
+        # authenticate нужен для проверки пароля и backend'а аутентификации
+        auth_user = authenticate(
+            username=user.username,
+            password=password,
+        )
+        if auth_user is None:
+            raise serializers.ValidationError(
+                _("Неверный логин/email/телефон или пароль."),
+                code="authorization",
+            )
+
+        if not auth_user.is_active:
+            raise serializers.ValidationError(
+                _("Пользователь деактивирован."),
+                code="authorization",
+            )
+
+        attrs["user"] = auth_user
         return attrs
 
 
@@ -212,6 +252,5 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
     def validate_email(self, value: str) -> str:
-        value = (value or "").strip().lower()
         # В целях безопасности не раскрываем, существует ли пользователь.
-        return value
+        return normalize_email(value)

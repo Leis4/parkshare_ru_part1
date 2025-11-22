@@ -1,12 +1,12 @@
 """
-Пакет настроек Django.
+Пакет настроек Django для ParkShare.
 
-По умолчанию используются настройки для локальной разработки
-(`backend.settings.local`).
+Важно:
+- Не используйте DJANGO_SETTINGS_MODULE=backend.settings.
+- Всегда указывайте конкретный модуль:
 
-Для продакшена задайте переменную окружения:
+    - backend.settings.local      — для локальной разработки
+    - backend.settings.production — для продакшена
 
-    DJANGO_SETTINGS_MODULE=backend.settings.production
+Это согласовано с проверками в backend.config.wsgi / asgi / celery.
 """
-
-from .local import *  # noqa: F401,F403

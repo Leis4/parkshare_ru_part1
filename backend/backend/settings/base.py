@@ -28,7 +28,9 @@ if env_file.exists():
     environ.Env.read_env(str(env_file))
 
 DEBUG: bool = env.bool("DEBUG", default=False)
-SECRET_KEY: str = env("SECRET_KEY", default="unsafe-secret-key-change-me")
+# ОБЯЗАТЕЛЬНО: ключ только из переменной окружения / .env
+SECRET_KEY: str = env("SECRET_KEY")
+
 
 ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 

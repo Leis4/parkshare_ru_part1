@@ -1,17 +1,24 @@
 #!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
 import os
 import sys
 
 
 def main() -> None:
     """Run administrative tasks."""
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings.local")
+    # Если DJANGO_SETTINGS_MODULE не задан, считаем, что это локальная разработка
+    if "DJANGO_SETTINGS_MODULE" not in os.environ:
+        os.environ["DJANGO_SETTINGS_MODULE"] = "backend.settings.local"
+        # Если бесит предупреждение — можно удалить print
+        print("⚠ DJANGO_SETTINGS_MODULE не задан, использую backend.settings.local (dev)")
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
         raise ImportError(
-            "Не удалось импортировать Django. Убедитесь, что он установлен и "
-            "доступен в вашем виртуальном окружении."
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
         ) from exc
     execute_from_command_line(sys.argv)
 

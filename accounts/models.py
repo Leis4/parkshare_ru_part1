@@ -7,13 +7,16 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_cryptography.fields import encrypt
 
+from .utils import hash_email, hash_phone
+
 
 class User(AbstractUser):
     """
     Кастомный пользователь:
     - UUID как первичный ключ;
     - роль (driver / owner / admin);
-    - email/телефон в зашифрованном виде (django-cryptography-django5).
+    - email/телефон в зашифрованном виде (django-cryptography-django5);
+    - отдельные хэши email/телефона для безопасного поиска/уникальности.
     """
 
     class Role(models.TextChoices):
@@ -31,6 +34,7 @@ class User(AbstractUser):
         help_text=_("Определяет права доступа в системе."),
     )
 
+    # Шифрованные контактные поля
     email_encrypted = encrypt(
         models.EmailField(
             _("Email (зашифрованный)"),
@@ -48,6 +52,23 @@ class User(AbstractUser):
             null=True,
             help_text=_("Опциональный телефон, хранится в зашифрованном виде."),
         )
+    )
+
+    # Отдельные хэши для поиска и проверки уникальности
+    email_hash = models.CharField(
+        _("Хэш нормализованного email"),
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text=_("Используется только для поиска и проверки уникальности email."),
+    )
+
+    phone_hash = models.CharField(
+        _("Хэш нормализованного телефона"),
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text=_("Используется только для поиска и проверки уникальности телефона."),
     )
 
     owner_request_pending = models.BooleanField(
@@ -71,14 +92,14 @@ class User(AbstractUser):
     @property
     def email_plain(self) -> str:
         """
-        Удобное свойство для доступа к расшифрованному email.
+        Доступ к расшифрованному email.
         В коде (и в админке) можно использовать user.email_plain.
         """
         return self.email_encrypted or ""
 
     @email_plain.setter
     def email_plain(self, value: str) -> None:
-        self.email_encrypted = value
+        self.email_encrypted = value or None
 
     @property
     def phone_plain(self) -> str:
@@ -86,7 +107,9 @@ class User(AbstractUser):
 
     @phone_plain.setter
     def phone_plain(self, value: str) -> None:
-        self.phone_encrypted = value
+        self.phone_encrypted = value or None
+
+    # Ролевые флаги
 
     @property
     def is_driver(self) -> bool:
@@ -99,3 +122,18 @@ class User(AbstractUser):
     @property
     def is_admin(self) -> bool:
         return self.role == self.Role.ADMIN or self.is_superuser
+
+    # Служебные методы
+
+    def update_contact_hashes(self) -> None:
+        """
+        Пересчитывает email_hash / phone_hash на основе текущих значений
+        email_plain / phone_plain.
+        """
+        self.email_hash = hash_email(self.email_plain)
+        self.phone_hash = hash_phone(self.phone_plain)
+
+    def save(self, *args, **kwargs) -> None:
+        # Перед сохранением всегда обновляем хэши контактов
+        self.update_contact_hashes()
+        super().save(*args, **kwargs)
