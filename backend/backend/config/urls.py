@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -8,14 +6,18 @@ from django.http import Http404, HttpResponse
 from django.urls import include, path
 from django.views.decorators.cache import never_cache
 from django.views.generic import TemplateView
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
 from rest_framework import routers
 
 from accounts import views as accounts_api
-from vehicles import views as vehicles_api
+from ai import views as ai_api
 from parking import views as parking_views
 from payments import views as payments_api
-from ai import views as ai_api
-
+from vehicles import views as vehicles_api
 
 router = routers.DefaultRouter()
 
@@ -25,7 +27,7 @@ router.register(r"accounts/users", accounts_api.UserViewSet, basename="user")
 # Vehicles
 router.register(r"vehicles", vehicles_api.VehicleViewSet, basename="vehicle")
 
-# Parking (основные модельные вьюсеты)
+# Parking
 router.register(r"parking/lots", parking_views.ParkingLotViewSet, basename="parking-lot")
 router.register(r"parking/spots", parking_views.ParkingSpotViewSet, basename="parking-spot")
 router.register(r"parking/bookings", parking_views.BookingViewSet, basename="booking")
@@ -40,8 +42,6 @@ router.register(r"payments", payments_api.PaymentViewSet, basename="payment")
 def service_worker(request):
     """
     Отдаём service-worker.js с корня домена, но физически он лежит в static/.
-
-    Это нужно, чтобы scope service worker распространялся на весь сайт.
     """
     path = finders.find("service-worker.js")
     if not path:
@@ -77,11 +77,24 @@ urlpatterns = [
     path("кабинет-владельца/", parking_views.OwnerDashboardView.as_view(), name="owner_dashboard"),
     path("offline/", TemplateView.as_view(template_name="offline.html"), name="offline"),
 
-    # Auth страницы (регистрация/логин)
+    # Auth страницы (регистрация/логин/сброс пароля)
     path("accounts/", include("accounts.urls")),
 
     # API (DRF router)
     path("api/", include(router.urls)),
+
+    # OpenAPI / документация
+    path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(url_name="api-schema"),
+        name="api-docs",
+    ),
+    path(
+        "api/docs/redoc/",
+        SpectacularRedocView.as_view(url_name="api-schema"),
+        name="api-docs-redoc",
+    ),
 
     # AI API
     path("api/ai/recommendations/", ai_api.RecommendationsAPIView.as_view(), name="ai_recommendations"),

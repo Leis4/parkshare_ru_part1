@@ -4,17 +4,25 @@ from typing import List
 
 import environ
 
-# Базовая директория Django-проекта (backend/)
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-# Корень репозитория (где лежат templates/ и static/)
-PROJECT_ROOT = BASE_DIR.parent
+# ---------------------------------------------------------------------------
+# Пути
+# ---------------------------------------------------------------------------
 
-# Настройка окружения через django-environ
+# BASE_DIR — корень репозитория: C:\Users\Sultan\Downloads\parkshare_ru_part1
+BASE_DIR = Path(__file__).resolve().parents[3]
+
+# Тут главная правка: больше не уходим на уровень выше
+PROJECT_ROOT = BASE_DIR  # C:\Users\Sultan\Downloads\parkshare_ru_part1
+
+
+# ---------------------------------------------------------------------------
+# Окружение
+# ---------------------------------------------------------------------------
+
 env = environ.Env(
     DEBUG=(bool, False),
 )
 
-# Читаем .env, если он существует
 env_file = PROJECT_ROOT / ".env"
 if env_file.exists():
     environ.Env.read_env(str(env_file))
@@ -22,10 +30,14 @@ if env_file.exists():
 DEBUG: bool = env.bool("DEBUG", default=False)
 SECRET_KEY: str = env("SECRET_KEY", default="unsafe-secret-key-change-me")
 
-ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["*"])
+ALLOWED_HOSTS: List[str] = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
-# Приложения Django
+# ---------------------------------------------------------------------------
+# Приложения
+# ---------------------------------------------------------------------------
+
 INSTALLED_APPS = [
+    # Django
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -37,6 +49,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "django_cryptography",
+    "drf_spectacular",
 
     # Проектные
     "accounts",
@@ -64,7 +77,7 @@ ROOT_URLCONF = "backend.config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [PROJECT_ROOT / "templates"],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -80,21 +93,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "backend.config.wsgi.application"
 ASGI_APPLICATION = "backend.config.asgi.application"
 
-# База данных (Postgres/PostGIS для продакшена, SQLite по умолчанию)
+# ---------------------------------------------------------------------------
+# Базы данных
+# ---------------------------------------------------------------------------
+
 DATABASES = {
     "default": env.db(
-        "DATABASE_URL", default=f"sqlite:///{PROJECT_ROOT / 'db.sqlite3'}"
+        "DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
     )
 }
 
-# Подмена engine на PostGIS, если используем PostgreSQL
+# Если используем PostgreSQL — переключаемся на PostGIS
 if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
     DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
 
-# Пользователь
+# ---------------------------------------------------------------------------
+# Пользователь / аутентификация
+# ---------------------------------------------------------------------------
+
 AUTH_USER_MODEL = "accounts.User"
 
-# Пароли
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -111,30 +129,42 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# ---------------------------------------------------------------------------
 # Локализация
+# ---------------------------------------------------------------------------
+
 LANGUAGE_CODE = env("LANGUAGE_CODE", default="ru-ru")
 TIME_ZONE = env("TIME_ZONE", default="Europe/Moscow")
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
-# Static & media
+# ---------------------------------------------------------------------------
+# Статика / медиа
+# ---------------------------------------------------------------------------
+
 STATIC_URL = "/static/"
-STATIC_ROOT = PROJECT_ROOT / "staticfiles"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
-    PROJECT_ROOT / "static",
+    BASE_DIR / "static",
 ]
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = PROJECT_ROOT / "media"
+MEDIA_ROOT = BASE_DIR / "media"
 
-# PWA‑цвета (для meta и manifest)
+# ---------------------------------------------------------------------------
+# PWA
+# ---------------------------------------------------------------------------
+
 PWA_APP_NAME = "ParkShare RU"
 PWA_APP_SHORT_NAME = "ParkShare"
 PWA_THEME_COLOR = "#0d6efd"
-PWA_BACKGROUND_COLOR = "#ffffff"
+PWA_BACKGROUND_COLOR = "#050816"
 
-# DRF
+# ---------------------------------------------------------------------------
+# DRF / OpenAPI
+# ---------------------------------------------------------------------------
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
@@ -144,13 +174,28 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "core.pagination.DefaultPageNumberPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
-# CORS (минимальный дефолт)
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+SPECTACULAR_SETTINGS = {
+    "TITLE": "ParkShare RU API",
+    "DESCRIPTION": "API сервиса бронирования парковочных мест ParkShare RU.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
 
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
 # Redis / Celery
-REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+# ---------------------------------------------------------------------------
+
+REDIS_URL = env("REDIS_URL", default="redis://redis:6379/0")
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
@@ -164,13 +209,20 @@ CELERY_BEAT_SCHEDULE = {
         "task": "parking.tasks.expire_unpaid_bookings",
         "schedule": 60 * 10,  # каждые 10 минут
     },
-    "recalculate_ai_analytics": {
-        "task": "ai.tasks.recalculate_analytics",
-        "schedule": 60 * 30,  # каждые 30 минут
+    "update_ai_models": {
+        "task": "ai.tasks.update_models",
+        "schedule": 60 * 60,  # раз в час
+    },
+    "check_stale_payments": {
+        "task": "payments.tasks.check_stale_payments",
+        "schedule": 60 * 15,  # каждые 15 минут
     },
 }
 
+# ---------------------------------------------------------------------------
 # Логи
+# ---------------------------------------------------------------------------
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -202,28 +254,52 @@ LOGGING = {
     },
 }
 
-# Безопасность (для продакшена переопределяется в .env)
+# ---------------------------------------------------------------------------
+# Email
+# ---------------------------------------------------------------------------
+
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default="ParkShare RU <noreply@example.com>",
+)
+SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+
+# ---------------------------------------------------------------------------
+# Безопасность (базовый уровень, детали переопределяются в production.py)
+# ---------------------------------------------------------------------------
+
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
 SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
 CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=False)
 X_FRAME_OPTIONS = "DENY"
 
-# Настройки шифрования (django-cryptography)
-DJANGO_CRYPTography_KEY = SECRET_KEY  # используется библиотекой для симметричного шифрования
+# ---------------------------------------------------------------------------
+# django-cryptography
+# ---------------------------------------------------------------------------
 
-# Соль для номеров машин
+DJANGO_CRYPTography_KEY = SECRET_KEY
+
+# ---------------------------------------------------------------------------
+# Бизнес-настройки
+# ---------------------------------------------------------------------------
+
 VEHICLE_PLATE_SALT = env("VEHICLE_PLATE_SALT", default="change_me_vehicle_salt")
 
-# Настройки YooKassa (пример, используются в payments.providers)
 YOOKASSA_SHOP_ID = env("YOOKASSA_SHOP_ID", default="")
 YOOKASSA_SECRET_KEY = env("YOOKASSA_SECRET_KEY", default="")
 YOOKASSA_RETURN_URL = env("YOOKASSA_RETURN_URL", default="")
 YOOKASSA_WEBHOOK_SECRET = env("YOOKASSA_WEBHOOK_SECRET", default="")
 
-# Комиссия сервиса (процент)
 SERVICE_COMMISSION_PERCENT = env.int("SERVICE_COMMISSION_PERCENT", default=10)
 
-# Кэш (по умолчанию локальный in‑memory, в проде можно переключить на Redis)
+# ---------------------------------------------------------------------------
+# Кэш по умолчанию — in-memory (в продакшене можно переключить на Redis)
+# ---------------------------------------------------------------------------
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",

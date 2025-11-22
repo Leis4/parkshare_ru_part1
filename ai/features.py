@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from backend.backend.parking.models import Booking
+from parking.models import Booking
 
 
 def bookings_dataframe() -> pd.DataFrame:
@@ -25,12 +25,12 @@ def bookings_dataframe() -> pd.DataFrame:
                 "spot_id": str(b.spot_id),
                 "lot_id": str(b.spot.lot_id),
                 "city": b.spot.lot.city,
-                "start": b.start,
-                "end": b.end,
-                "duration_hours": b.duration_hours,
+                "start": b.start_at,
+                "end": b.end_at,
+                "duration_hours": (b.end_at - b.start_at).total_seconds() / 3600.0,
                 "price": float(b.total_price),
-                "dow": b.start.weekday(),
-                "hour": b.start.hour,
+                "dow": b.start_at.weekday(),
+                "hour": b.start_at.hour,
             }
         )
 

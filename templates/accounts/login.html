@@ -20,23 +20,22 @@
             {% endif %}
 
             {% for field in form.visible_fields %}
-    <div class="ps-form-row">
-        <label class="ps-form-label" for="{{ field.id_for_label }}">
-            {{ field.label }}
-        </label>
+                <div class="ps-form-row">
+                    <label class="ps-form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
 
-        {# просто рендерим поле #}
-        {{ field }}
+                    {{ field }}
 
-        {% if field.help_text %}
-            <div class="ps-field-help">{{ field.help_text }}</div>
-        {% endif %}
-        {% for error in field.errors %}
-            <div class="ps-field-error">{{ error }}</div>
-        {% endfor %}
-    </div>
-{% endfor %}
 
+                    {% if field.help_text %}
+                        <div class="ps-field-help">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <div class="ps-field-error">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
 
             <div class="ps-form-actions">
                 <button type="submit" class="ps-btn ps-btn-full">
@@ -48,6 +47,8 @@
         <div class="ps-auth-footer">
             Нет аккаунта?
             <a href="{% url 'accounts:register' %}">Зарегистрироваться</a>
+            <br>
+            <a href="{% url 'accounts:password_reset' %}">Забыли пароль?</a>
         </div>
     </div>
 </section>

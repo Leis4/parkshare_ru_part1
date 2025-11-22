@@ -1,98 +1,109 @@
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict
+import uuid
+from decimal import Decimal
+from typing import Any, Tuple
 
 from django.conf import settings
-from django.http import HttpRequest
-from yookassa import Configuration, Payment as YooPayment
+from django.core.exceptions import ImproperlyConfigured
 
-from ..models import Payment
-from .base import PaymentProvider
-
-logger = logging.getLogger(__name__)
+try:
+    # Официальный синхронный SDK YooKassa
+    from yookassa import Configuration, Payment as YooPayment  # type: ignore[import]
+except ImportError:  # pragma: no cover - мягкий фолбэк
+    Configuration = None
+    YooPayment = None
 
 
 class YooKassaError(Exception):
-    """Обёртка над ошибками платёжного провайдера."""
+    """Базовая ошибка при работе с YooKassa."""
     pass
 
 
-def _setup_yookassa() -> None:
+def _configure_yookassa() -> None:
     """
     Настраивает SDK YooKassa из Django settings.
 
-    Ожидает:
+    Требуются:
     - YOOKASSA_SHOP_ID
-    - YOOKASSA_API_KEY
+    - YOOKASSA_SECRET_KEY
     """
-    Configuration.account_id = getattr(settings, "YOOKASSA_SHOP_ID", None)
-    Configuration.secret_key = getattr(settings, "YOOKASSA_API_KEY", None)
+    if Configuration is None or YooPayment is None:
+        raise ImproperlyConfigured(
+            "Пакет 'yookassa' не установлен. Добавьте его в requirements.txt."
+        )
+
+    shop_id = getattr(settings, "YOOKASSA_SHOP_ID", "")
+    secret_key = getattr(settings, "YOOKASSA_SECRET_KEY", "")
+    if not shop_id or not secret_key:
+        raise ImproperlyConfigured(
+            "Не заданы YOOKASSA_SHOP_ID и/или YOOKASSA_SECRET_KEY в настройках."
+        )
+
+    Configuration.account_id = shop_id
+    Configuration.secret_key = secret_key
 
 
-class YooKassaProvider(PaymentProvider):
+def create_yookassa_payment(booking) -> Tuple[str, str, dict[str, Any]]:
     """
-    Платёжный провайдер YooKassa.
-    Ожидает, что Payment имеет поле `amount`.
+    Создаёт платёж в YooKassa для указанной брони.
+
+    Возвращает:
+        (payment_url, provider_payment_id, raw_response_dict)
+
+    Все сетевые вызовы инкапсулированы здесь.
     """
+    _configure_yookassa()
 
-    def create_payment(self, payment: Payment, return_url: str) -> Dict[str, Any]:
-        try:
-            _setup_yookassa()
+    from parking.models import Booking  # локальный импорт, чтобы избежать циклов
 
-            if not getattr(payment, "amount", None):
-                raise YooKassaError(
-                    "У Payment отсутствует поле amount — исправьте модель."
-                )
+    if not isinstance(booking, Booking):
+        raise YooKassaError("create_yookassa_payment ожидает экземпляр Booking.")
 
-            amount = {
-                "value": str(payment.amount),
-                "currency": "RUB",
-            }
+    amount = booking.total_price
+    if not isinstance(amount, Decimal):
+        amount = Decimal(str(amount))
 
-            data = {
-                "amount": amount,
-                "capture": True,
-                "confirmation": {
-                    "type": "redirect",
-                    "return_url": return_url,
-                },
-                "description": f"Оплата бронирования #{payment.id}",
-                "metadata": {"payment_id": str(payment.id)},
-            }
+    amount_str = str(amount.quantize(Decimal("0.01")))
+    currency = booking.currency or "RUB"
+    return_url = getattr(settings, "YOOKASSA_RETURN_URL", "")
 
-            y_payment = YooPayment.create(data)
+    description = f"Оплата брони #{booking.id} — {booking.spot}"
 
-            if hasattr(payment, "provider"):
-                payment.provider = "yookassa"
-            if hasattr(payment, "provider_payment_id"):
-                payment.provider_payment_id = y_payment.id
+    payload: dict[str, Any] = {
+        "amount": {
+            "value": amount_str,
+            "currency": currency,
+        },
+        "confirmation": {
+            "type": "redirect",
+            "return_url": return_url,
+        },
+        "capture": True,
+        "description": description,
+        "metadata": {
+            "booking_id": str(booking.id),
+            "user_id": str(booking.user_id),
+        },
+    }
 
-            payment.save(update_fields=["provider", "provider_payment_id"])
+    try:
+        payment = YooPayment.create(payload, uuid.uuid4())
+    except Exception as exc:  # noqa: BLE001
+        raise YooKassaError(str(exc)) from exc
 
-            try:
-                return y_payment.json()
-            except Exception:
-                return {
-                    "id": y_payment.id,
-                    "status": getattr(y_payment, "status", None),
-                    "amount": amount,
-                }
+    confirmation = getattr(payment, "confirmation", None)
+    payment_url = getattr(confirmation, "confirmation_url", None) if confirmation else None
+    provider_payment_id = getattr(payment, "id", None)
 
-        except YooKassaError:
-            raise
-        except Exception as exc:
-            logger.exception("Ошибка YooKassa")
-            raise YooKassaError(str(exc)) from exc
+    if not payment_url or not provider_payment_id:
+        raise YooKassaError(
+            "Некорректный ответ от YooKassa: не получены id или URL оплаты."
+        )
 
+    raw_response = {
+        "id": provider_payment_id,
+        "status": getattr(payment, "status", None),
+    }
 
-def create_yookassa_payment(
-    request: HttpRequest,
-    payment: Payment,
-    return_url: str,
-) -> Dict[str, Any]:
-    """
-    Функция для обратной совместимости.
-    """
-    provider = YooKassaProvider()
-    return provider.create_payment(payment=payment, return_url=return_url)
+    return payment_url, provider_payment_id, raw_response
