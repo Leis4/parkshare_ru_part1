@@ -13,9 +13,10 @@ User = get_user_model()
 
 def find_user_by_identifier(identifier: str) -> Optional[User]:
     """
-    Возвращает пользователя по логину / email / телефону.
+    ВРЕМЕННО: ищем только по username.
 
-    Используется в HTML-форме логина и в API.
+    Раньше тут был поиск по email_encrypted / phone_encrypted,
+    но django-cryptography не даёт по этим полям делать filter/get.
     """
     if not identifier:
         return None
@@ -23,27 +24,11 @@ def find_user_by_identifier(identifier: str) -> Optional[User]:
     ident = identifier.strip()
     qs = User.objects.filter(is_active=True)
 
-    # 1) Email
-    if "@" in ident:
-        email = ident.lower()
-        try:
-            return qs.get(email_encrypted=email)
-        except User.DoesNotExist:
-            return None
-        except User.MultipleObjectsReturned:
-            return qs.filter(email_encrypted=email).order_by("date_joined").first()
-
-    # 2) Телефон
-    phone = normalize_phone(ident)
-    if phone:
-        user = qs.filter(phone_encrypted=phone).order_by("date_joined").first()
-        if user:
-            return user
-
-    # 3) Логин
+    # 1) Логин (username)
     try:
         return qs.get(username__iexact=ident)
     except User.DoesNotExist:
         return None
     except User.MultipleObjectsReturned:
         return qs.filter(username__iexact=ident).order_by("date_joined").first()
+

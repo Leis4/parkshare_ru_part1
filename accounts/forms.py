@@ -62,27 +62,39 @@ class RegisterForm(UserCreationForm):
             "username": forms.TextInput(attrs={"class": "ps-input"}),
         }
 
+    # В RegisterForm
     def clean_email(self) -> str:
-        email = (self.cleaned_data.get("email") or "").strip()
-        if not email:
-            return ""
-        email = email.lower()
-        if User.objects.filter(email_encrypted=email).exists():
-            raise forms.ValidationError(
-                _("Пользователь с таким email уже зарегистрирован.")
-            )
+        """
+        Просто нормализуем email, без запросов к БД.
+        """
+        email = (self.cleaned_data.get("email") or "").strip().lower()
         return email
 
     def clean_phone(self) -> str:
-        phone = self.cleaned_data.get("phone")
+        """
+        Только нормализуем номер, без проверки уникальности.
+        """
+        phone = self.cleaned_data.get("phone") or ""
         if not phone:
             return ""
-        phone_norm = normalize_phone(phone)
-        if User.objects.filter(phone_encrypted=phone_norm).exists():
-            raise forms.ValidationError(
-                _("Пользователь с таким телефоном уже зарегистрирован.")
-            )
-        return phone_norm
+
+        phone = normalize_phone(phone)
+        if not phone:
+            raise forms.ValidationError(_("Некорректный формат телефона."))
+        return phone
+
+    def save(self, commit: bool = True) -> Any:
+        user: User = super().save(commit=False)
+
+        email = self.cleaned_data.get("email", "").strip().lower()
+        phone = self.cleaned_data.get("phone", "")
+
+        user.email_plain = email or ""
+        user.phone_plain = normalize_phone(phone or "") if phone else ""
+
+        if commit:
+            user.save()
+        return user
 
     def save(self, commit: bool = True) -> User:
         user: User = super().save(commit=False)
@@ -126,39 +138,30 @@ class ProfileForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
     def clean_email(self) -> str:
-        email = (self.cleaned_data.get("email") or "").strip()
-        if not email:
-            return ""
-        email = email.lower()
-        qs = User.objects.filter(email_encrypted=email)
-        if self.instance.pk:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise forms.ValidationError(
-                _("Пользователь с таким email уже зарегистрирован.")
-            )
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        # Больше НИКАКИХ запросов к User.objects.filter(email_encrypted=...)
         return email
 
     def clean_phone(self) -> str:
-        phone = self.cleaned_data.get("phone")
+        phone = self.cleaned_data.get("phone") or ""
         if not phone:
             return ""
-        phone_norm = normalize_phone(phone)
-        qs = User.objects.filter(phone_encrypted=phone_norm)
-        if self.instance.pk:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise forms.ValidationError(
-                _("Пользователь с таким телефоном уже зарегистрирован.")
-            )
-        return phone_norm
 
-    def save(self, commit: bool = True) -> User:
+        phone = normalize_phone(phone)
+        if not phone:
+            raise forms.ValidationError(_("Некорректный формат телефона."))
+        # Больше НИКАКИХ запросов к User.objects.filter(phone_encrypted=...)
+        return phone
+
+    def save(self, commit: bool = True) -> Any:
         user: User = super().save(commit=False)
-        email = self.cleaned_data.get("email") or ""
+
+        email = (self.cleaned_data.get("email") or "").strip().lower()
         phone = self.cleaned_data.get("phone") or ""
-        user.email_plain = email
-        user.phone_plain = phone
+
+        user.email_plain = email or ""
+        user.phone_plain = normalize_phone(phone or "") if phone else ""
+
         if commit:
             user.save()
         return user
